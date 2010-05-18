@@ -1,190 +1,29 @@
 #!/usr/bin/perl
 
-BEGIN {
-  $abuild_base_dir = "/work/abuild/lib/abuild";
-  unshift @INC, "$abuild_base_dir/modules";
-}
-
 use POSIX;
-
-use Needed;
-use FILE;
-use CONFIG;
-
-use bbuildlib;
 
 use GD;
 use Time::Local 'timelocal_nocheck';
 
-sub makemonth {
-  my $h = shift;
-  my $outfile = shift;
-  my $title = shift;
-  my $yistime = shift;
+use Getopt::Long;
+Getopt::Long::Configure("no_ignore_case");
 
-  my $width = 640;
-  my $height = 480;
+my $opt_justgraph;
+my $opt_interesting;
+my $opt_allinteresting;
 
-  my $image = new GD::Image($width, $height);
-  my $black = $image->colorAllocate (0, 0, 0);
-  my $white = $image->colorAllocate (0xff, 0xff, 0xff);
-  my $blue = $image->colorAllocate (0, 0, 255);
-  my $lblue = $image->colorAllocate (110, 200, 255);
-  my $gray    = $image->colorAllocate (128, 128, 128);
-  #my $grayd   = $image->colorAllocate (64, 64, 64);
-  my $grayd = $black;
-  my $back    = $image->colorAllocate (0xee, 0xee, 0xee);
-  my $red     = $image->colorAllocate (255,   0,   0);
-  $image->filledRectangle (0, 0, $width - 1, $height - 1, $back);
-  my $ixoff = 60;
-  my $iyoff = 30;
-  my $SmallFontWidth = gdSmallFont->width;
-  my $SmallFontHeight = gdSmallFont->height;
-  my $iw = $width - $ixoff - 20;
-  my $ih = $height - $iyoff - 20 - $SmallFontHeight * 1;
+my $numlongest = 10;
 
-  $image->filledRectangle ($ixoff, $iyoff, $ixoff + $iw - 1, $iyoff +$ih - 1, $white);
+GetOptions (
+    'justgraph' => \$opt_justgraph,
+    'numlongest=s' => \$numlongest,
+    'interesting=s' => \$opt_interesting,
+    'allinteresting' => \$opt_allinteresting,
+) or exit(1);
 
-  my @h = sort {$a <=> $b} keys %$h;
-  my @hv = sort {$a <=> $b} values %$h;
-
-  my $xaxisend = $now;
-  my $xaxisstart = $h[0] || $now;
-
-  my @xaxisend  = localtime($xaxisend);
-  splice @xaxisend, 6;
-  $xaxisend[5] += 1900;
-  $xaxisend[0] = 0;
-  $xaxisend[1] = 0;
-  $xaxisend[2] = 0;
-  $xaxisend[3] = 1;
-  $xaxisend[4]++;
-  if ($xaxisend[4] == 12) {
-    $xaxisend[4] = 0;
-    $xaxisend[5]++;
-  }
-
-  $xaxisstart = $xaxisend - 6 * 31 * 24 * 3600 if $xaxisend - 6 * 31 * 24 * 3600 < $xaxisstart;
-  my @xaxisstart  = localtime($xaxisstart);
-  $xaxisstart[5] += 1900;
-  $xaxisstart[0] = 0;
-  $xaxisstart[1] = 0;
-  $xaxisstart[2] = 0;
-  $xaxisstart[3] = 1;
-  splice @xaxisstart, 6;
-
-  $xaxisstart = Time::Local::timelocal(@xaxisstart);
-  $xaxisend = Time::Local::timelocal(@xaxisend);
-
-  my $yaxisround;
-  my $nsub;
- 
-  if ($yistime) {
-    $nsub = 4;
-    $yaxisround = $hv[$#hv] >= 7200 ? 3600 : 60;
-    $yaxisend = int(($hv[$#hv] * 1.1 + $yaxisround - 1) / $yaxisround) * $yaxisround;
-    $yaxisstep = int($yaxisend / 12);
-    $yaxisstep = int(($yaxisstep + $yaxisround - 1) / $yaxisround) * $yaxisround;
-    $yaxisstep = $yaxisround == $yaxisend ? $yaxisround / 4 : $yaxisround unless $yaxisstep;
-  } else {
-    $nsub = 5;
-    $yaxisround = $hv[$#hv] > 200 ? 100 : 10;
-    $yaxisend = int(($hv[$#hv] * 1.1 + $yaxisround - 1) / $yaxisround) * $yaxisround;
-    $yaxisstep = int($yaxisend / 10);
-    $yaxisstep = int(($yaxisstep + $yaxisround / 2 - 1) / $yaxisround) * $yaxisround;
-    $yaxisstep = $yaxisround == $yaxisend ? $yaxisround / 5 : $yaxisround unless $yaxisstep;
-  }
-  $yaxisstep = int($yaxisstep / $nsub);
-  $yaxisstep = 1 unless $yaxisstep;
-  $yaxisend = 10 unless $yaxisend;
-
-  my ($x, $y, $nx);
-
-  my $ox = 0;
-  my $oy;
-  for $t (@h) {
-    $x = $ixoff + int($iw / ($xaxisend - $xaxisstart) * ($t - $xaxisstart));
-    $y = $iyoff + $ih - 1 - int($ih / $yaxisend * $h->{$t});
-    $y = $iyoff if $y < $iyoff;
-    if ($ox) {
-      $image->filledRectangle($ox, $oy, $x, $iyoff + $ih - 1, $blue);
-    }
-    $ox = $x;
-    $oy = $y;
-  }
-  if ($ox) {
-    $image->filledRectangle($ox, $oy, $ox, $iyoff + $ih - 1, $blue);
-  }
-
-  $image->rectangle($ixoff, $iyoff, $ixoff + $iw - 1, $iyoff +$ih - 1, $gray);
-
-  my $xax = Time::Local::timelocal(@xaxisstart);
-  my $nxax;
-  my @mnames = qw{Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec};
-  print "X axis: $xaxisstart $xaxisend\n";
-  while ($xax < $xaxisend) {
-    my $name = $mnames[$xaxisstart[4]];
-    $xaxisstart[4]++;
-    if ($xaxisstart[4] == 12) {
-      $xaxisstart[4] = 0;
-      $xaxisstart[5]++;
-    }
-    $nxax = Time::Local::timelocal(@xaxisstart);
-    if ($xax < $xaxisstart) {
-      $xax = $nxax;
-      next;
-    }
-    $x = $ixoff + int($iw / ($xaxisend - $xaxisstart) * ($xax - $xaxisstart));
-    $image->setStyle ($grayd, gdTransparent, gdTransparent);
-
-    if ($xax > $xaxisstart) {
-      $image->line($x, $iyoff, $x, $iyoff + $ih - 1, gdStyled);
-      $image->line($x, $iyoff + $ih - 3, $x, $iyoff +$ih, $grayd);
-      $image->line($x, $iyoff - 1, $x, $iyoff + 2, $grayd);
-    }
-    if ($nxax <= $xaxisend) {
-      $nx = $ixoff + int($iw / ($xaxisend - $xaxisstart) * ($nxax - $xaxisstart));
-      $nx = ($x + $nx) / 2;
-      $strw = $SmallFontWidth * length($name);
-      $image->string(gdSmallFont, $nx - $strw/2, $iyoff +$ih + 5, $name, $black);
-    }
-    $xax = $nxax;
-  }
-
-  print "Y axis: 0 $yaxisend $yaxisstep $nsub\n";
-  $yax = $yaxisstep;
-  my $sub = 1;
-  while ($yax < $yaxisend) {
-    $y = $iyoff + $ih - 1 - int($ih / $yaxisend * $yax);
-    if ($sub) {
-      $image->setStyle ($gray, gdTransparent, gdTransparent);
-    } else {
-      $image->setStyle ($grayd, gdTransparent, gdTransparent);
-    }
-    $image->line($ixoff, $y, $ixoff + $iw - 1, $y, gdStyled);
-    $image->line($ixoff - 1, $y, $ixoff + 2, $y, $sub ? $gray : $grayd);
-    $image->line($ixoff + $iw - 3, $y, $ixoff + $iw, $y, $sub ? $gray : $grayd);
-
-    if ($sub == 0) {
-      my $str;
-      $str = $yistime ? hhmm($yax) : "$yax";
-      my $strw = $SmallFontWidth * length($str);
-      $image->string(gdSmallFont, $ixoff - $strw - 5, $y - $SmallFontHeight/2, $str, $black);
-    }
-    $yax += $yaxisstep;
-    $sub = ($sub + 1) % $nsub;
-  }
-
-  #$str = "# of packages";
-  #$strw = $SmallFontWidth * length($str);
-  #$image->stringUp(gdSmallFont, 7, $iyoff + $ih/2 + $strw/2, $str, $black);
-
-  my $strw = gdMediumBoldFont->width() * length($title);
-  $image->string(gdMediumBoldFont, $width/2 - $strw/2, 5, $title, $black);
-
-  open(IMG, ">$outfile") || die("$outfile: $!\n");
-  print IMG $image->png;
-  close IMG;
+sub unify {
+    my %h = map {$_ => 1} @_;
+    return grep(delete($h{$_}), @_);
 }
 
 sub hhmm {
@@ -193,194 +32,23 @@ sub hhmm {
   return sprintf("%02d:%02d", int($t / 60), $t % 60);
 }
 
-sub makeday {
-  my $h = shift;
-  my $h2 = shift;
-  my $outfile = shift;
-  my $title = shift;
-  my $yistime = shift;
-
-  my $width = 640;
-  my $height = 480;
-
-  my $image = new GD::Image($width, $height);
-  my $black = $image->colorAllocate (0, 0, 0);
-  my $white = $image->colorAllocate (0xff, 0xff, 0xff);
-  my $blue = $image->colorAllocate (0, 0, 255);
-  my $lblue = $image->colorAllocate (110, 200, 255);
-  my $gray    = $image->colorAllocate (128, 128, 128);
-  #my $grayd   = $image->colorAllocate (64, 64, 64);
-  my $grayd = $black;
-  my $back    = $image->colorAllocate (0xee, 0xee, 0xee);
-  my $red     = $image->colorAllocate (255,   0,   0);
-  $image->filledRectangle (0, 0, $width - 1, $height - 1, $back);
-  my $ixoff = 60;
-  my $iyoff = 30;
-  my $SmallFontWidth = gdSmallFont->width;
-  my $SmallFontHeight = gdSmallFont->height;
-  my $iw = $width - $ixoff - 20;
-  my $ih = $height - $iyoff - 20 - $SmallFontHeight * 1;
-
-  $image->filledRectangle ($ixoff, $iyoff, $ixoff + $iw - 1, $iyoff +$ih - 1, $white);
-
-  my @h = sort {$a <=> $b} keys %$h;
-  my @hv = sort {$a <=> $b} values %$h;
-  my @hv2 = sort {$a <=> $b} values %$h2;
-
-  my $xaxisend = $now;
-  my $xaxisstart = $h[0] || $now;
-
-  my @xaxisend  = localtime($xaxisend);
-  splice @xaxisend, 6;
-  $xaxisend[5] += 1900;
-  $xaxisend[0] = 0;
-  $xaxisend[1] = 0;
-  $xaxisend[2] = 0;
-  $xaxisend[3]++;
-
-  $xaxisstart = $xaxisend - 24 * 3600 if $xaxisend - 24 * 3600 < $xaxisstart;
-  my @xaxisstart  = localtime($xaxisstart);
-  splice @xaxisstart, 6;
-  $xaxisstart[5] += 1900;
-  $xaxisstart[0] = 0;
-  $xaxisstart[1] = 0;
-  $xaxisstart[2] = 0;
-
-  $xaxisstart = Time::Local::timelocal_nocheck(@xaxisstart);
-  $xaxisend = Time::Local::timelocal_nocheck(@xaxisend);
-
-  my $yaxisround;
-  my $nsub;
- 
-  if ($yistime) {
-    $nsub = 4;
-    $yaxisround = $hv[$#hv] >= 7200 ? 3600 : 60;
-    $yaxisend = int(($hv[$#hv] * 1.1 + $yaxisround - 1) / $yaxisround) * $yaxisround;
-    $yaxisstep = int($yaxisend / 12);
-    $yaxisstep = int(($yaxisstep + $yaxisround - 1) / $yaxisround) * $yaxisround;
-    $yaxisstep = $yaxisround == $yaxisend ? $yaxisround / 4 : $yaxisround unless $yaxisstep;
-  } else {
-    $nsub = 5;
-    $yaxisround = $hv[$#hv] > 200 ? 100 : 10;
-    $yaxisend = int(($hv[$#hv] * 1.1 + $yaxisround - 1) / $yaxisround) * $yaxisround;
-    $yaxisstep = int($yaxisend / 10);
-    $yaxisstep = int(($yaxisstep + $yaxisround / 2 - 1) / $yaxisround) * $yaxisround;
-    $yaxisstep = $yaxisround == $yaxisend ? $yaxisround / 5 : $yaxisround unless $yaxisstep;
-  }
-  $yaxisstep = int($yaxisstep / $nsub);
-  $yaxisstep = 1 unless $yaxisstep;
-  $yaxisend = 10 unless $yaxisend;
-
-  my ($x, $y1, $y2, $nx);
-
-  my $ox = 0;
-  my ($oy1, $oy2);
-  for $t (@h) {
-    $x = $ixoff + int($iw / ($xaxisend - $xaxisstart) * ($t - $xaxisstart));
-    $y1 = $iyoff + $ih - 1 - int($ih / $yaxisend * $h->{$t});
-    $y1 = $iyoff if $y1 < $iyoff;
-    $y2 = $iyoff + $ih - 1 - int($ih / $yaxisend * $h2->{$t}) if $h2;
-    $y2 = $iyoff if $y2 < $iyoff;
-    if ($ox) {
-      $image->filledRectangle($ox, $oy1, $x, $oy2, $blue);
-      $image->filledRectangle($ox, $oy2, $x, $iyoff + $ih - 1, $lblue) if $h2;
-    }
-    $ox = $x;
-    $oy1 = $y1;
-    $oy2 = $y2;
-  }
-  if ($ox) {
-    $image->filledRectangle($ox, $oy1, $ox, $oy2, $blue);
-    $image->filledRectangle($ox, $oy2, $ox, $iyoff + $ih - 1, $lblue) if $h2;
-  }
-
-  $image->rectangle($ixoff, $iyoff, $ixoff + $iw - 1, $iyoff +$ih - 1, $gray);
-
-  my $xax = Time::Local::timelocal_nocheck(@xaxisstart);
-  my $nxax;
-  my @mnames = qw{Sun Mon Tue Wed Thu Fri Sat};
-  print "X axis: $xaxisstart $xaxisend\n";
-  while ($xax < $xaxisend) {
-    @xaxisstart = localtime($xax);
-    my $name = $mnames[$xaxisstart[6]];
-    splice @xaxisstart, 6;
-    $xaxisstart[3]++;
-    $nxax = Time::Local::timelocal_nocheck(@xaxisstart);
-    if ($xax < $xaxisstart) {
-      $xax = $nxax;
-      next;
-    }
-    $x = $ixoff + int($iw / ($xaxisend - $xaxisstart) * ($xax - $xaxisstart));
-    $image->setStyle ($grayd, gdTransparent, gdTransparent);
-
-    if ($xax > $xaxisstart) {
-      $image->line($x, $iyoff, $x, $iyoff + $ih - 1, gdStyled);
-      $image->line($x, $iyoff + $ih - 3, $x, $iyoff +$ih, $grayd);
-      $image->line($x, $iyoff - 1, $x, $iyoff + 2, $grayd);
-    }
-    if ($nxax <= $xaxisend) {
-      $nx = $ixoff + int($iw / ($xaxisend - $xaxisstart) * ($nxax - $xaxisstart));
-      $nx = ($x + $nx) / 2;
-      $strw = $SmallFontWidth * length($name);
-      $image->string(gdSmallFont, $nx - $strw/2, $iyoff +$ih + 5, $name, $black);
-    }
-    $xax = $nxax;
-  }
-
-  print "Y axis: 0 $yaxisend $yaxisstep $nsub\n";
-  $yax = $yaxisstep;
-  my $sub = 1;
-  while ($yax < $yaxisend) {
-    $y = $iyoff + $ih - 1 - int($ih / $yaxisend * $yax);
-    if ($sub) {
-      $image->setStyle ($gray, gdTransparent, gdTransparent);
-    } else {
-      $image->setStyle ($grayd, gdTransparent, gdTransparent);
-    }
-    $image->line($ixoff, $y, $ixoff + $iw - 1, $y, gdStyled);
-    $image->line($ixoff - 1, $y, $ixoff + 2, $y, $sub ? $gray : $grayd);
-    $image->line($ixoff + $iw - 3, $y, $ixoff + $iw, $y, $sub ? $gray : $grayd);
-
-    if ($sub == 0) {
-      my $str;
-      $str = $yistime ? hhmm($yax) : "$yax";
-      my $strw = $SmallFontWidth * length($str);
-      $image->string(gdSmallFont, $ixoff - $strw - 5, $y - $SmallFontHeight/2, $str, $black);
-    }
-    $yax += $yaxisstep;
-    $sub = ($sub + 1) % $nsub;
-  }
-
-  $str = "# of packages";
-  $strw = $SmallFontWidth * length($str);
-  $image->stringUp(gdSmallFont, 7, $iyoff + $ih/2 + $strw/2, $str, $black);
-
-  my $strw = gdMediumBoldFont->width() * length($title);
-  $image->string(gdMediumBoldFont, $width/2 - $strw/2, 5, $title, $black);
-
-  open(IMG, ">$outfile") || die("$outfile: $!\n");
-  print IMG $image->png;
-  close IMG;
-}
-
-
-my $noupdate = 0;
-if ($ARGV[0] eq '-t') {
-  $noupdate = 1;
-  shift @ARGV;
-}
-
 my $dist = shift @ARGV;
 die("No dist specified!\n") unless $dist ne '';
 
-$templdir = "/work/cd/bin/diststats";
+$templdir = ".";
 $ddir = $dist;
 $ddir =~ s,/,::,g;
 mkdir "output", 0755;
 $ddir = "output/$ddir";
 
+my $lastfinfn = "$ddir/lastfin";
+
 mkdir $ddir, 0755 unless -d $ddir;
 die unless -d $ddir;
+
+goto drawgraph if $opt_justgraph;
+
+open(LASTFIN, '>', $lastfinfn);
 
 my $pack = undef;
 my $text = undef;
@@ -425,15 +93,20 @@ sub handle_ch_builddep($) {
 require XML::Parser;
 my $pdep = new XML::Parser( Handlers => {Start => \&handle_builddep, End => \&handle_end_builddep, Char => \&handle_ch_builddep});
 
-open(FOO, "osc api '/build/$dist/_builddepinfo' |");
-$pdep->parse(*FOO, ProtocolEncoding => 'UTF-8');
-close(FOO);
+my $fn = "$ddir/_builddepinfo.xml";
+if (! -e $fn) {
+	print "retreiving builddepinfo\n";
+	system("osc api '/build/$dist/_builddepinfo' > $fn");
+}
+$pdep->parsefile($fn, ProtocolEncoding => 'UTF-8');
 
 $now = time;
 $now_m = POSIX::strftime("%Y-%m-%d", localtime($now - 30 * 24 * 3600));
 $now_a = POSIX::strftime("%Y-%m-%d", localtime($now - 90 * 24 * 3600));
 
 #goto nixda;
+
+%failed;
 
 use Data::Dumper;
 sub handle_start($)
@@ -445,7 +118,6 @@ sub handle_start($)
       while (my $attr = shift) {
         $attrs{$attr} = shift;
       }
-      return if ($attrs{"code"} eq "failed");
       #print Dumper(\%attrs) . "\n";
       my $package = $attrs{"package"};
       my $client = $attrs{"workerid"};
@@ -457,28 +129,42 @@ sub handle_start($)
   my $ti = $starttime - $readytime;
   my $tb = $endtime - $readytime;
 
-  if ($starttime ge $now_m) {
-    $clients{$client} = 1;
+  if ($attrs{"code"} eq "failed") {
+      print "FAILED: $package $t $ti $tb\n";
+      if (!exists $failed{$package} || $failed{$package} < $t) {
+	  $failed{$package} = $t;
+      }
+      return;
   }
-  if ($starttime ge $now_m && !$packmin_m{$package} || $packmin_m{$package} > $t) {
-    $packmin_m{$package} = $t;
-    $packmin1_m{$package} = $ti;
-    $packmin2_m{$package} = $tb;
+  if (!$packmin_m{$package} || $packmin_m{$package}->[0] > $t) {
+    $packmin_m{$package} = [$t, $ti, $tb];
   }
   return unless !$packmin{$package} || $packmin{$package} > $t || $starttime le $now_a;
   $packmin{$package} = $t;
   }
 
+$fn = "$ddir/_jobhistory.xml";
+if (! -e $fn) {
+	print "retreiving jobhistory\n";
+	system("osc api '/build/$dist/_jobhistory?code=lastfailures' > $fn");
+}
 my $p1 = new XML::Parser( Handlers => {Start => \&handle_start});
-
-open(FOO, "osc api '/build/$dist/_jobhistory?code=lastfailures' |");
-$p1->parse(*FOO, ProtocolEncoding => 'UTF-8');
-close(FOO);
+$p1->parsefile($fn, ProtocolEncoding => 'UTF-8');
 
 for $pack (@packs_to_setup) {
   if (!$packmin{$pack}) {
-    print STDERR "unknown build time for $pack\n";
-    $packmin{$pack} = 300;
+    if ($failed{$pack}) {
+	$packmin{$pack} = $failed{$pack};
+	if ($packmin{$pack} < 300) {
+	    print STDERR "$pack failed quickly, assuming five minutes\n";
+	    $packmin{$pack} = 300;
+	} else {
+	    print STDERR "$pack failed, guessing time\n";
+	}
+    } else {
+	print STDERR "unknown build time for $pack\n";
+	$packmin{$pack} = 300;
+    }
   }
 }
 
@@ -657,6 +343,11 @@ if (!@basepacks) {
   }
 }
 
+open(FOO, '>', "$ddir/deps");
+print FOO Dumper(\%pdeps);
+print FOO Dumper(\%packmin);
+close FOO;
+
 print "Basepacks timings:\n";
 for $pack (split(',', $done[0])) {
   print "$pack: $packmin{$pack}\n";
@@ -738,30 +429,65 @@ while (@todo || $nbuild)
     $lpath =~ s/.*? //;
     $lpath =~ s/\Q$firstcycle\E/basepacks/ if $firstcycle;
     print "$ti: finished $p: $lpath\n";
-    push @lastfin, "$p $lpath";
-    shift @lastfin if @lastfin > 10;
+    print LASTFIN "$p $lpath\n";
     $done{$p} = 2;
     $nbuild -= @pp;
   }
 }
 $nbuild{$ti} = 0;
 $nwait{$ti}  = 0;
+close LASTFIN;
+
+open(FOO, '>', "$ddir/simul");
+print FOO Data::Dumper->Dump(
+    [$numpacks, \%nbuild, \%nwait, \%needed, \%packmin_m],
+    [qw/numpacks *nbuild   *nwait   *needed   *packmin_m/]);
+close FOO;
+
+drawgraph:
+if ($opt_justgraph) {
+    open(FOO, '<', "$ddir/simul") || die "$!";
+    eval join('', <FOO>);
+    close FOO;
+    $maxnbuild = 0;
+    $ti = 0;
+    for (keys %nbuild) {
+	$maxnbuild = $nbuild{$_} if ($maxnbuild < $nbuild{$_});
+	$ti = $_ if ($ti < $_);
+    }
+}
+
+my @interesting;
+open(LASTFIN, '<', $lastfinfn) || die "$!";
+while(<LASTFIN>) {
+    chomp;
+    if ($opt_interesting) {
+	push @interesting, $_ if $_ =~ /^$opt_interesting /;
+    } else {
+	push @interesting, $_;
+	shift @interesting if @interesting > $numlongest;
+    }
+}
+close(LASTFIN);
 
 %inttimes = ();
 print "Last finished:\n";
 $lastfincols = 0;
-for $lf (@lastfin) {
+for $lf (@interesting) {
   @lf = split(' ', $lf);
   $p = shift @lf;
   $lastfincols = @lf if @lf > $lastfincols;
   $t = 0;
   @q = @lf;
-  print $p.": ".join(' ', @lf)."\n";
-  while (@q > 1) {
+  #print $p.": ".join(' ', @lf)."\n";
+  print "$p\n";
+  while (@q > 0) {
     $q = shift @q;
     next unless $q =~ /^(.*)\((.*)\)$/;
     $t += $2;
-    next if $2 < 500 && $needed{$1} < 20;
+    # skip package with short build time that doesn't trigger many
+    # other packages
+    next if !$opt_allinteresting && $2 < 500 && $needed{$1} < 20;
     $inttimes{$t} = $1;
   }
 }
@@ -787,8 +513,8 @@ $xaxisstep = int($xaxisstep / 4);
 $yaxisstep = int($yaxisstep / 5);
 $yaxisstep = 1 unless $yaxisstep;
 
-my $width = 640;
-my $height = 480;
+my $width = 1500;
+my $height = 800;
 
 my $image = new GD::Image($width, $height);
 $black = $image->colorAllocate (0, 0, 0);
@@ -885,7 +611,7 @@ for $t (sort {$a <=> $b} keys %inttimes) {
   $image->filledRectangle($x - $strw - 1, $y - $TinyFontHeight, $x - 1, $y, $back);
   $image->string(gdTinyFont, $x - $strw - 1, $y - $TinyFontHeight, $str, $black);
   $yy++;
-  $yy = 0 if $yy == 3;
+  $yy = 0 if $yy == 5;
 }
 
 $str = "# of packages";
@@ -913,12 +639,12 @@ $in =~ s/\<NUMPACKS\>/$numpacks/sg;
 print "making longes table\n";
 $colspan = $lastfincols * 3 + 1;
 $ltab = "<table cellpadding=0 cellspacing=0 border=0>\n<tr>\n<td colspan=$colspan width=1 bgcolor=\"#336699\"><img src=void.gif width=1 height=1 border=0></td>\n</tr>\n";
-for $lf (reverse @lastfin) {
+for $lf (reverse @interesting) {
   $ltab .= "<tr>\n";
   @lf = split(' ', $lf);
   shift @lf;
-  push @lf, '' while @lf < $lastfincols;
-  for $q (@lf) {
+  unshift @lf, '' while @lf < $lastfincols;
+  for $q (reverse @lf) {
     $ltab .= "<td width=1 bgcolor=\"#336699\"><img src=\"void.gif\" width=1 height=18 border=0></td>\n";
     if ($q =~ /^(.*)\((.*)\)$/) {
       $ltab .= "<td>&nbsp;$1:</td>\n";
@@ -935,7 +661,7 @@ $ltab .= "<tr>\n<td colspan=$colspan width=1 bgcolor=\"#336699\"><img src=void.g
 $in =~ s/\<TABLE_LONGEST\>/$ltab/s;
 
 print "making packmin table\n";
-@packmin_m = sort {$packmin_m{$b} <=> $packmin_m{$a}} keys %packmin_m;
+@packmin_m = sort {$packmin_m{$b}->[0] <=> $packmin_m{$a}->[0]} keys %packmin_m;
 $rtab = "<table cellpadding=0 cellspacing=0 border=0>\n<tr>\n<td colspan=7 width=1 bgcolor=\"#336699\"><img src=void.gif width=1 height=1 border=0></td>\n</tr>\n";
 $rtab .= "<tr>\n";
 $rtab .= "<td width=1 bgcolor=\"#336699\"><img src=\"void.gif\" width=1 height=18 border=0></td>\n";
@@ -947,15 +673,15 @@ $rtab .= "<td align=center bgcolor=\"#336699\">&nbsp;&nbsp;&nbsp;<font color=\"#
 $rtab .= "<td width=1 bgcolor=\"#336699\"><img src=\"void.gif\" width=1 height=1 border=0></td>\n";
 $rtab .= "</tr>\n";
 $rtab .= "<tr>\n<td colspan=7 width=1 bgcolor=\"#336699\"><img src=void.gif width=1 height=1 border=0></td>\n</tr>\n";
-for $pack (splice(@packmin_m, 0, 10)) {
+for $pack (splice(@packmin_m, 0, 50)) {
   $rtab .= "<tr>\n";
   $rtab .= "<td width=1 bgcolor=\"#336699\"><img src=\"void.gif\" width=1 height=18 border=0></td>\n";
   $rtab .= "<td bgcolor=\"#eeeeee\">&nbsp;$pack&nbsp;</td>\n";
   $rtab .= "<td width=1 bgcolor=\"#336699\"><img src=\"void.gif\" width=1 height=1 border=0></td>\n";
-  $h = hhmm($packmin1_m{$pack});
+  $h = hhmm($packmin_m{$pack}->[1]);
   $rtab .= "<td align=right>&nbsp;&nbsp;&nbsp;$h&nbsp;&nbsp;&nbsp;</td>\n";
   $rtab .= "<td width=1 bgcolor=\"#336699\"><img src=\"void.gif\" width=1 height=1 border=0></td>\n";
-  $h = hhmm($packmin2_m{$pack});
+  $h = hhmm($packmin_m{$pack}->[2]);
   $rtab .= "<td align=right>&nbsp;&nbsp;&nbsp;$h&nbsp;&nbsp;&nbsp;</td>\n";
   $rtab .= "<td width=1 bgcolor=\"#336699\"><img src=\"void.gif\" width=1 height=1 border=0></td>\n";
   $rtab .= "</tr>\n";
@@ -963,66 +689,6 @@ for $pack (splice(@packmin_m, 0, 10)) {
 $rtab .= "<tr>\n<td colspan=7 width=1 bgcolor=\"#336699\"><img src=void.gif width=1 height=1 border=0></td>\n</tr>\n</table>\n";
 $in =~ s/\<TABLE_LONGPACKS\>/$rtab/s;
 
-$numclients = keys %clients;
-
-$in =~ s/\<NUMCLIENTS\>/$numclients/sg;
-
 open(IN, ">$ddir/index.html") || die("$ddir/index.html: $!\n");
 print IN $in;
 close IN;
-
-nixda:
-
-%rebuildtime = ();
-if (open(DI, "<$ddir/data")) {
-  while(<DI>) {
-    @l = split;
-    next unless @l >= 3;
-    $numpacks{$l[0]} = $l[1];
-    $rebuildtime{$l[0]} = $l[2];
-    $numclients{$l[0]} = $l[3] if @l > 3;
-  }
-  close DI;
-}
-$numpacks{$now} = $numpacks;
-$rebuildtime{$now} = $ti;
-$numclients{$now} = $numclients;
-
-if (!$noupdate) {
-  if (open(DI, ">>$ddir/data")) {
-    print DI "$now $numpacks $ti $numclients\n";
-    close DI;
-  }
-}
-
-
-my %realbuild_7_s;
-my %realbuild_7_b;
-$realbuild7cut = $now - 7 * 86400;
-
-@realbuild7cut = localtime($realbuild7cut);
-splice @realbuild7cut, 6;
-$realbuild7cut[0] = 0;
-$realbuild7cut[1] = 0;
-$realbuild7cut[2] = 0;
-$realbuild7cut = Time::Local::timelocal_nocheck(@realbuild7cut);
-
-
-my ($day, $nday, $days, $dayn);
-$dayn = 0;
-$days = 0;
-$day = 0;
-
-print "making numpack chart\n";
-makemonth(\%numpacks, "$ddir/numpacks.png", "Number of packages");
-print "making checkin chart\n";
-makemonth(\%checkins, "$ddir/checkins.png", "Checkins");
-print "making rebuildtime chart\n";
-makemonth(\%rebuildtime, "$ddir/rebuildtime.png", "Rebuildtime", 1);
-print "making numclients chart\n";
-makemonth(\%numclients, "$ddir/numclients.png", "Clients");
-print "making bbuildtime chart\n";
-makemonth(\%bbuildtime, "$ddir/bbuild.png", "Complete setup_bbuild time", 1);
-print "making real build 7 chart\n";
-makeday(\%realbuild_7_s, \%realbuild_7_b, "$ddir/rbuild7.png", "Packages built last week");
-
