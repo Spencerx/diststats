@@ -11,6 +11,7 @@ Getopt::Long::Configure("no_ignore_case");
 my $opt_justgraph;
 my $opt_interesting;
 my $opt_allinteresting;
+my $verbose;
 
 my $numlongest = 10;
 
@@ -19,6 +20,7 @@ GetOptions (
     'numlongest=s' => \$numlongest,
     'interesting=s' => \$opt_interesting,
     'allinteresting' => \$opt_allinteresting,
+    'verbose' => \$verbose,
 ) or exit(1);
 
 sub unify {
@@ -98,6 +100,7 @@ if (! -e $fn) {
 	print "retreiving builddepinfo\n";
 	system("osc api '/build/$dist/_builddepinfo' > $fn");
 }
+print "parsing build deps ...\n";
 $pdep->parsefile($fn, ProtocolEncoding => 'UTF-8');
 
 $now = time;
@@ -149,6 +152,7 @@ if (! -e $fn) {
 	system("osc api '/build/$dist/_jobhistory?code=lastfailures' > $fn");
 }
 my $p1 = new XML::Parser( Handlers => {Start => \&handle_start});
+print "parsing jobhistory...\n";
 $p1->parsefile($fn, ProtocolEncoding => 'UTF-8');
 
 for $pack (@packs_to_setup) {
@@ -174,6 +178,7 @@ for $pack (@packs_to_setup) {
 ###  Sort specfiles
 ###
 
+print "calculating dependencies...\n";
 # map dependencies to real packages, ignore - deps, filter out self
 for $pack (@packs_to_setup) {
   $pdeps{$pack} = [ unify(grep {$_ ne $pack} map {$subpack2pack{$_} || ()} grep {!/^-/} @{$deps{$pack} || []}) ];
@@ -243,6 +248,8 @@ if (@basepacks) {
   unshift @todo, 'autoconf';
 }
 
+print "sorting ...\n";
+$now = time;
 
 # sort everything
 while (@todo) {
@@ -325,6 +332,9 @@ while (@todo) {
   }
 }
 
+$now = time-$now;
+print "done sorting in $now secs\n";
+
 # put nearly alls to back
 @nas = grep {$nearly_alls{$_}} @done;
 @done = grep {!$nearly_alls{$_}} @done;
@@ -343,11 +353,6 @@ if (!@basepacks) {
   }
 }
 
-open(FOO, '>', "$ddir/deps");
-print FOO Dumper(\%pdeps);
-print FOO Dumper(\%packmin);
-close FOO;
-
 print "Basepacks timings:\n";
 for $pack (split(',', $done[0])) {
   print "$pack: $packmin{$pack}\n";
@@ -363,31 +368,66 @@ $nbuild = 0;
 $firstcycle = ($todo[0] =~ /,/) ? $todo[0] : '';
 print "first cycle: $firstcycle\n";
 
+my %cycles;
+for $p (keys %pdeps) {
+  @deps = unify(@{$pdeps{$p}});
+  # prepare arrays for cycles so we don't need to split them in
+  # inner loop later
+  for $dep (@deps) {
+    @c = split(/,/, $dep);
+    if (@c > 1) {
+      $cycles{$dep} = [@c];
+    }
+  }
+  $pdeps{$p} = [@deps];
+}
+
+open(FOO, '>', "$ddir/deps");
+print FOO Data::Dumper->Dump(
+    [$firstcycle, \%pdeps, \%packmin, \%cycles],
+    [qw/firstcycle  *pdeps   *packmin   *cycles /]);
+close FOO;
+
 %deppath = ();
 
 %nbuild = ();
 %nwait = ();
 $maxnbuild = 0;
 
-while (@todo || $nbuild)
+$now = time;
+$cnt = 0;
+$maxiter = 0;
+$numtodo = @todo;
+while ($numtodo || $nbuild)
 {
   $nwait = 0;
-  if (@todo)
+  ++$cnt;
+  last if $maxiter && $cnt > $maxiter;
+  my $numstarted = 0;
+  if ($numtodo)
     {
-      for $p (splice @todo) {
+      for ($i=0; $i < @todo; ++$i) {
+	$p = $todo[$i];
+	next unless $p;
         @deps = @{$pdeps{$p} || []};
-        @pp = split(',', $p);
+	if ($cycles{$p}) {
+	  @pp = @{$cycles{$p}};
+	} else {
+	  @pp = ($p);
+	}
 	if (grep {$done{$_} != 2} @deps) {
-	  push @todo, $p;
+	  #push @todo, $p;
 	  $nwait += @pp;
 	  next;
 	}
 	if (@pp == 1 && $firstcycle && $done{$firstcycle} != 2) {
-	  push @todo, $p;
+	  #push @todo, $p;
 	  $nwait += @pp;
 	  next;
 	}
-	print "$ti: starting $p\n";
+	$todo[$i] = undef;
+	++$numstarted;
+	print "$ti: starting $p\n" if $verbose;
         $nbuild += @pp;
         $n = 0;
 	for (@pp) {
@@ -404,10 +444,16 @@ while (@todo || $nbuild)
 	push @sched, [$eti, $p, $lpath];
       }
     }
+  $numtodo -= $numstarted;
+  die "argl" if $numtodo < 0;
   if ($nbuild == 0 && $nwait > 0) {
     for $p (@todo) {
         @deps = @{$pdeps{$p} || []};
-        @pp = split(',', $p);
+	if ($cycles{$p}) {
+	  @pp = @{$cycles{$p}};
+	} else {
+	  @pp = ($p);
+	}
 	print "$p waiting for:";
 	for $pp (grep {$done{$_} != 2} @deps) {
 	  print " $pp";
@@ -419,16 +465,21 @@ while (@todo || $nbuild)
   $nbuild{$ti} = $nbuild;
   $maxnbuild = $nbuild if $maxnbuild < $nbuild;
   $nwait{$ti}  = $nwait;
-  print "$ti: build $nbuild wait $nwait\n";
-  @sched = sort {$a->[0] <=> $b->[0]} @sched;
-  if (@sched) {
+  my $numsched = @sched;
+  print "$ti: build $nbuild wait $nwait todo $numtodo sched $numsched\n";
+  if ($numsched) {
+    @sched = sort {$a->[0] <=> $b->[0]} @sched;
     $s = shift @sched;
     ($ti, $p, $lpath) = @{$s};
-    @pp = split(',', $p);
+    if ($cycles{$p}) {
+      @pp = @{$cycles{$p}};
+    } else {
+      @pp = ($p);
+    }
     $deppath{$p} = $lpath;
     $lpath =~ s/.*? //;
     $lpath =~ s/\Q$firstcycle\E/basepacks/ if $firstcycle;
-    print "$ti: finished $p: $lpath\n";
+    print "$ti: finished $p: $lpath\n" if $verbose;
     print LASTFIN "$p $lpath\n";
     $done{$p} = 2;
     $nbuild -= @pp;
@@ -437,6 +488,9 @@ while (@todo || $nbuild)
 $nbuild{$ti} = 0;
 $nwait{$ti}  = 0;
 close LASTFIN;
+
+$now = time-$now;
+print "simulation done after $now secs\n";
 
 open(FOO, '>', "$ddir/simul");
 print FOO Data::Dumper->Dump(
