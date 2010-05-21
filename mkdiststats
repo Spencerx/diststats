@@ -8,10 +8,14 @@ use Time::Local 'timelocal_nocheck';
 use Getopt::Long;
 Getopt::Long::Configure("no_ignore_case");
 
+my $width = 1000;
+my $height = 450;
+
 my $opt_justgraph;
 my $opt_interesting;
 my $opt_allinteresting;
 my $verbose;
+my $maxiter = 0;
 
 my $numlongest = 10;
 
@@ -21,6 +25,7 @@ GetOptions (
     'interesting=s' => \$opt_interesting,
     'allinteresting' => \$opt_allinteresting,
     'verbose' => \$verbose,
+    'maxiter' => \$maxiter,
 ) or exit(1);
 
 sub unify {
@@ -244,8 +249,9 @@ if (@basepacks) {
   @todo = grep {!$basepacks{$_}} @todo;
   unshift @todo, $cycle;
 } else {
+  my $n = @todo;
   @todo = grep {$_ ne 'autoconf'} @todo;
-  unshift @todo, 'autoconf';
+  unshift @todo, 'autoconf' if $n != @todo;
 }
 
 print "sorting ...\n";
@@ -388,6 +394,15 @@ print FOO Data::Dumper->Dump(
     [qw/firstcycle  *pdeps   *packmin   *cycles /]);
 close FOO;
 
+print "calculating reverse graph ...\n";
+use Dfs;
+my $self = new Dfs(\%pdeps);
+for my $cycle (keys %cycles) {
+    $self->{'nodes'}->{$cycle} = [];
+}
+$self->startrdfs(@todo);
+#print Dumper($self->{'reversedgraph'});
+
 %deppath = ();
 
 %nbuild = ();
@@ -396,99 +411,164 @@ $maxnbuild = 0;
 
 $now = time;
 $cnt = 0;
-$maxiter = 0;
-$numtodo = @todo;
-while ($numtodo || $nbuild)
+
+$nwait = @todo;
+for my $p (splice @todo) {
+    if($self->{'reverseorder'}->{$p}==0) {
+	push @todo, $p;
+    }
+}
+print "number of packages $nwait\n";
+
+my %tofinish;
+while ($nwait || $nbuild)
 {
-  $nwait = 0;
   ++$cnt;
   last if $maxiter && $cnt > $maxiter;
   my $numstarted = 0;
-  if ($numtodo)
-    {
-      for ($i=0; $i < @todo; ++$i) {
-	$p = $todo[$i];
-	next unless $p;
-        @deps = @{$pdeps{$p} || []};
-	if ($cycles{$p}) {
-	  @pp = @{$cycles{$p}};
-	} else {
-	  @pp = ($p);
-	}
-	if (grep {$done{$_} != 2} @deps) {
-	  #push @todo, $p;
-	  $nwait += @pp;
-	  next;
-	}
-	if (@pp == 1 && $firstcycle && $done{$firstcycle} != 2) {
-	  #push @todo, $p;
-	  $nwait += @pp;
-	  next;
-	}
-	$todo[$i] = undef;
-	++$numstarted;
-	print "$ti: starting $p\n" if $verbose;
-        $nbuild += @pp;
-        $n = 0;
-	for (@pp) {
-	  $n = $packmin{$_} if $n < $packmin{$_};
-	}
-	$n *= 2 if @pp > 1;
-	$eti = $ti + $n;
-	$lpath = '';
-	for $l (@deps) {
-	  $lpath = $deppath{$l} if $deppath{$l} == $ti;
-        }
-	$lpath =~ s/.*? //;
-	$lpath = "$eti $lpath $p($n)";
-	push @sched, [$eti, $p, $lpath];
+
+  if ($ti) {
+    die "BUG: nothing finishes at $ti!\n" unless exists $tofinish{$ti};
+    my $nfinish = @{$tofinish{$ti}};
+    $nbuild -= $nfinish;
+    for my $p (@{$tofinish{$ti}}) {
+      print "$ti: finished $p\n" if $verbose;
+      for my $dep (@{$self->{'reversedgraph'}->{$p}}) {
+	$self->{'reverseorder'}->{$dep}--;
+	push @todo, $dep if $self->{'reverseorder'}->{$dep} == 0;
       }
+      delete $self->{'reverseorder'}->{$node};
     }
-  $numtodo -= $numstarted;
-  die "argl" if $numtodo < 0;
-  if ($nbuild == 0 && $nwait > 0) {
-    for $p (@todo) {
-        @deps = @{$pdeps{$p} || []};
-	if ($cycles{$p}) {
-	  @pp = @{$cycles{$p}};
-	} else {
-	  @pp = ($p);
-	}
-	print "$p waiting for:";
-	for $pp (grep {$done{$_} != 2} @deps) {
-	  print " $pp";
-        }
- 	print "\n";
-    }
-    die;
+    delete $tofinish{$ti};
   }
+
+  $nbuild += @todo;
+  $numstarted += @todo;
+  $nwait -= @todo;
+  die "nwait < 0\n" if $nwait < 0;
+  my $i = 0;
+  for my $p (splice @todo) {
+    my $eti = 0;
+    if ($cycles{$p}) {
+      for (@{$cycles{$p}}) {
+	$eti = $packmin{$_} if $eti < $packmin{$_};
+      }
+      $eti *= 2;
+    } else {
+      $eti = $packmin{$p};
+    }
+    $eti += $ti;
+    print "$ti: starting $p, will finish at $eti\n" if $verbose;
+    $tofinish{$eti} = [] unless exists $tofinish{$eti};
+    push @{$tofinish{$eti}}, $p;
+  }
+
   $nbuild{$ti} = $nbuild;
   $maxnbuild = $nbuild if $maxnbuild < $nbuild;
   $nwait{$ti}  = $nwait;
-  my $numsched = @sched;
-  print "$ti: build $nbuild wait $nwait todo $numtodo sched $numsched\n";
-  if ($numsched) {
-    @sched = sort {$a->[0] <=> $b->[0]} @sched;
-    $s = shift @sched;
-    ($ti, $p, $lpath) = @{$s};
-    if ($cycles{$p}) {
-      @pp = @{$cycles{$p}};
-    } else {
-      @pp = ($p);
-    }
-    $deppath{$p} = $lpath;
-    $lpath =~ s/.*? //;
-    $lpath =~ s/\Q$firstcycle\E/basepacks/ if $firstcycle;
-    print "$ti: finished $p: $lpath\n" if $verbose;
-    print LASTFIN "$p $lpath\n";
-    $done{$p} = 2;
-    $nbuild -= @pp;
+  print "$ti: build $nbuild wait $nwait started $numstarted\n" if $verbose;
+
+  if ($nbuild == 0 && $nwait > 0) {
+    die "deadlocked\n";
   }
+
+  my $nextti = 0;
+  for $t (keys %tofinish) {
+    if (!$nextti) {
+      $nextti = $t;
+      next;
+    }
+    $nextti = $t if $t < $nextti;
+  }
+  last unless $nextti;
+  $ti = $nextti;
+
+#  if ($numtodo)
+#    {
+#      for ($i=0; $i < @todo; ++$i) {
+#	$p = $todo[$i];
+#	next unless $p;
+#        @deps = @{$pdeps{$p} || []};
+#	if ($cycles{$p}) {
+#	  @pp = @{$cycles{$p}};
+#	} else {
+#	  @pp = ($p);
+#	}
+#	if (grep {$done{$_} != 2} @deps) {
+#	  #push @todo, $p;
+#	  $nwait += @pp;
+#	  next;
+#	}
+#	if (@pp == 1 && $firstcycle && $done{$firstcycle} != 2) {
+#	  #push @todo, $p;
+#	  $nwait += @pp;
+#	  next;
+#	}
+#	$todo[$i] = undef;
+#	++$numstarted;
+#	print "$ti: starting $p\n" if $verbose;
+#        $nbuild += @pp;
+#        $n = 0;
+#	for (@pp) {
+#	  $n = $packmin{$_} if $n < $packmin{$_};
+#	}
+#	$n *= 2 if @pp > 1;
+#	$eti = $ti + $n;
+#	$lpath = '';
+#	for $l (@deps) {
+#	  $lpath = $deppath{$l} if $deppath{$l} == $ti;
+#        }
+#	$lpath =~ s/.*? //;
+#	$lpath = "$eti $lpath $p($n)";
+#	push @sched, [$eti, $p, $lpath];
+#      }
+#    }
+#  $numtodo -= $numstarted;
+#  die "argl" if $numtodo < 0;
+#  if ($nbuild == 0 && $nwait > 0) {
+#    for $p (@todo) {
+#        @deps = @{$pdeps{$p} || []};
+#	if ($cycles{$p}) {
+#	  @pp = @{$cycles{$p}};
+#	} else {
+#	  @pp = ($p);
+#	}
+#	print "$p waiting for:";
+#	for $pp (grep {$done{$_} != 2} @deps) {
+#	  print " $pp";
+#        }
+# 	print "\n";
+#    }
+#    die;
+#  }
+#  $nbuild{$ti} = $nbuild;
+#  $maxnbuild = $nbuild if $maxnbuild < $nbuild;
+#  $nwait{$ti}  = $nwait;
+#  my $numsched = @sched;
+#  print "$ti: build $nbuild wait $nwait started $numstarted sched $numsched\n";
+#  if ($numsched) {
+#    @sched = sort {$a->[0] <=> $b->[0]} @sched;
+#    $s = shift @sched;
+#    ($ti, $p, $lpath) = @{$s};
+#    if ($cycles{$p}) {
+#      @pp = @{$cycles{$p}};
+#    } else {
+#      @pp = ($p);
+#    }
+#    $deppath{$p} = $lpath;
+#    $lpath =~ s/.*? //;
+#    $lpath =~ s/\Q$firstcycle\E/basepacks/ if $firstcycle;
+#    print "$ti: finished $p: $lpath\n" if $verbose;
+#    print LASTFIN "$p $lpath\n";
+#    $done{$p} = 2;
+#    $nbuild -= @pp;
+#  }
 }
 $nbuild{$ti} = 0;
 $nwait{$ti}  = 0;
 close LASTFIN;
 
+#print Dumper(\%nbuild, $ti);
 $now = time-$now;
 print "simulation done after $now secs\n";
 
@@ -566,9 +646,6 @@ $yaxisstep = $yaxisround == $yaxisend ? $yaxisround / 5 : $yaxisround unless $ya
 $xaxisstep = int($xaxisstep / 4);
 $yaxisstep = int($yaxisstep / 5);
 $yaxisstep = 1 unless $yaxisstep;
-
-my $width = 1500;
-my $height = 800;
 
 my $image = new GD::Image($width, $height);
 $black = $image->colorAllocate (0, 0, 0);
