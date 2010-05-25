@@ -396,12 +396,12 @@ close FOO;
 
 print "calculating reverse graph ...\n";
 use Dfs;
-my $self = new Dfs(\%pdeps);
+my $dfs = new Dfs(\%pdeps);
 for my $cycle (keys %cycles) {
-    $self->{'nodes'}->{$cycle} = [];
+    $dfs->{'nodes'}->{$cycle} = [];
 }
-$self->startrdfs(@todo);
-#print Dumper($self->{'reversedgraph'});
+$dfs->startrdfs(@todo);
+#print Dumper($dfs->{'reversedgraph'});
 
 %deppath = ();
 
@@ -414,13 +414,14 @@ $cnt = 0;
 
 $nwait = @todo;
 for my $p (splice @todo) {
-    if($self->{'reverseorder'}->{$p}==0) {
+    if($dfs->{'reverseorder'}->{$p}==0) {
 	push @todo, $p;
     }
 }
 print "number of packages $nwait\n";
 
-my %tofinish;
+my %building;
+my %finished;
 while ($nwait || $nbuild)
 {
   ++$cnt;
@@ -428,18 +429,19 @@ while ($nwait || $nbuild)
   my $numstarted = 0;
 
   if ($ti) {
-    die "BUG: nothing finishes at $ti!\n" unless exists $tofinish{$ti};
-    my $nfinish = @{$tofinish{$ti}};
+    die "BUG: nothing finishes at $ti!\n" unless exists $building{$ti};
+    my $nfinish = @{$building{$ti}};
     $nbuild -= $nfinish;
-    for my $p (@{$tofinish{$ti}}) {
+    for my $p (@{$building{$ti}}) {
       print "$ti: finished $p\n" if $verbose;
-      for my $dep (@{$self->{'reversedgraph'}->{$p}}) {
-	$self->{'reverseorder'}->{$dep}--;
-	push @todo, $dep if $self->{'reverseorder'}->{$dep} == 0;
+      $finished{$p} = $ti;
+      for my $dep (@{$dfs->{'reversedgraph'}->{$p}}) {
+	$dfs->{'reverseorder'}->{$dep}--;
+	push @todo, $dep if $dfs->{'reverseorder'}->{$dep} == 0;
       }
-      delete $self->{'reverseorder'}->{$node};
+      delete $dfs->{'reverseorder'}->{$node};
     }
-    delete $tofinish{$ti};
+    delete $building{$ti};
   }
 
   $nbuild += @todo;
@@ -459,8 +461,8 @@ while ($nwait || $nbuild)
     }
     $eti += $ti;
     print "$ti: starting $p, will finish at $eti\n" if $verbose;
-    $tofinish{$eti} = [] unless exists $tofinish{$eti};
-    push @{$tofinish{$eti}}, $p;
+    $building{$eti} = [] unless exists $building{$eti};
+    push @{$building{$eti}}, $p;
   }
 
   $nbuild{$ti} = $nbuild;
@@ -473,7 +475,7 @@ while ($nwait || $nbuild)
   }
 
   my $nextti = 0;
-  for $t (keys %tofinish) {
+  for $t (keys %building) {
     if (!$nextti) {
       $nextti = $t;
       next;
@@ -578,6 +580,33 @@ print FOO Data::Dumper->Dump(
     [qw/numpacks *nbuild   *nwait   *needed   *packmin_m/]);
 close FOO;
 
+my $last;
+for my $p (keys %finished) {
+  if (!$last) {
+    $last = $p;
+    next;
+  }
+  $last = $p if $finished{$last} < $finished{$p};
+}
+
+print "last: $last\n";
+my @longest;
+while(1) {
+  push @longest, $last;
+  last unless @{$pdeps{$last}};
+  my $l;
+  for my $dep (@{$pdeps{$last}}) {
+    if (!$l) {
+      $l = $dep;
+      next;
+    }
+    $l = $dep if $finished{$l} < $finished{$dep};
+  }
+  $last = $l;
+}
+
+#print Dumper(\@longest);
+
 drawgraph:
 if ($opt_justgraph) {
     open(FOO, '<', "$ddir/simul") || die "$!";
@@ -591,39 +620,14 @@ if ($opt_justgraph) {
     }
 }
 
-my @interesting;
-open(LASTFIN, '<', $lastfinfn) || die "$!";
-while(<LASTFIN>) {
-    chomp;
-    if ($opt_interesting) {
-	push @interesting, $_ if $_ =~ /^$opt_interesting /;
-    } else {
-	push @interesting, $_;
-	shift @interesting if @interesting > $numlongest;
-    }
-}
-close(LASTFIN);
-
 %inttimes = ();
 print "Last finished:\n";
-$lastfincols = 0;
-for $lf (@interesting) {
-  @lf = split(' ', $lf);
-  $p = shift @lf;
-  $lastfincols = @lf if @lf > $lastfincols;
-  $t = 0;
-  @q = @lf;
-  #print $p.": ".join(' ', @lf)."\n";
-  print "$p\n";
-  while (@q > 0) {
-    $q = shift @q;
-    next unless $q =~ /^(.*)\((.*)\)$/;
-    $t += $2;
-    # skip package with short build time that doesn't trigger many
-    # other packages
-    next if !$opt_allinteresting && $2 < 500 && $needed{$1} < 20;
-    $inttimes{$t} = $1;
-  }
+$lastfincols = @longest;
+for $p (@longest) {
+  # skip package with short build time that doesn't trigger many
+  # other packages
+  next if !$opt_allinteresting && $packmin{$p} < 500 && $needed{$p} < 20;
+  $inttimes{$finished{$p}} = $p;
 }
 print "Interesting:\n";
 for $t (sort {$a <=> $b} keys %inttimes) {
