@@ -367,6 +367,7 @@ for $pack (split(',', $done[0])) {
 @todo = @done;
 %done = ();
 $done{$_} = 2 for @unknowndep;
+@done = ();
 
 $ti = 0;
 $nbuild = 0;
@@ -437,6 +438,7 @@ while ($nwait || $nbuild)
     $nbuild -= $nfinish;
     for my $p (@{$building{$ti}}) {
       print "$ti: finished $p\n" if $verbose;
+      push @done, $p;
       $finished{$p} = $ti;
       for my $dep (@{$dfs->{'reversedgraph'}->{$p}}) {
 	$dfs->{'reverseorder'}->{$dep}--;
@@ -579,8 +581,8 @@ print "simulation done after $now secs\n";
 
 open(FOO, '>', "$ddir/simul");
 print FOO Data::Dumper->Dump(
-    [$numpacks, \%nbuild, \%nwait, \%needed, \%packmin_m, \%finished],
-    [qw/numpacks *nbuild   *nwait   *needed   *packmin_m   *finished/]);
+    [$numpacks, \%nbuild, \%nwait, \%needed, \%packmin_m, \%finished, \@done],
+    [qw/numpacks *nbuild   *nwait   *needed   *packmin_m   *finished   *done/]);
 close FOO;
 
 #print Dumper(\@longest);
@@ -605,12 +607,11 @@ my $packalias = {};
 $packalias->{$firstcycle} = 'basepacks' if $firstcycle;
 
 my $last;
-for my $p (keys %finished) {
-  if (!$last) {
-    $last = $p;
-    next;
-  }
-  $last = $p if $finished{$last} < $finished{$p};
+
+if ($opt_interesting) {
+  $last = $opt_interesting;
+} else {
+  $last = $done[-1];
 }
 
 print "last: $last\n";
