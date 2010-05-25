@@ -605,39 +605,55 @@ if ($opt_justgraph) {
 
 my $packalias = {};
 $packalias->{$firstcycle} = 'basepacks' if $firstcycle;
+for my $p (@done) {
+  next unless $p =~ /^OpenOffice_org/;
+  $q = $p;
+  $q =~ s/OpenOffice_org/OOo/;
+  $packalias->{$p} = $q;
+}
 
 my $last;
 
 if ($opt_interesting) {
-  $last = $opt_interesting;
+  $last = [$opt_interesting];
 } else {
-  $last = $done[-1];
+  $last = \@done;
 }
 
-print "last: $last\n";
 my @longest;
-while(1) {
-  push @longest, $last;
-  last unless @{$pdeps{$last}};
-  my $l;
-  for my $dep (@{$pdeps{$last}}) {
-    if (!$l) {
-      $l = $dep;
-      next;
+my %longest;
+my $i = 0;
+my $lastfincols = 0;
+for my $p (reverse @$last) {
+  next if exists $longest{$p};
+  $path = [];
+  while(1) {
+    push @$path, $p;
+    $longest{$p} = 1;
+    last unless @{$pdeps{$p}};
+    my $l;
+    for my $dep (@{$pdeps{$p}}) {
+      if (!$l) {
+	$l = $dep;
+	next;
+      }
+      $l = $dep if $finished{$l} < $finished{$dep};
     }
-    $l = $dep if $finished{$l} < $finished{$dep};
+    $p = $l;
   }
-  $last = $l;
+  push @longest, $path;
+  $lastfincols = @$path if $lastfincols < @$path;
+  ++$i;
+  last unless $opt_interesting || $i < 10;
 }
 
 %inttimes = ();
 print "Last finished:\n";
-$lastfincols = @longest;
-for $p (@longest) {
+for $p (keys %longest) {
   # skip package with short build time that doesn't trigger many
   # other packages
   next if !$opt_allinteresting && $packmin{$p} < 500 && $needed{$p} < 20;
-  $inttimes{$finished{$p}} = $p;
+  $inttimes{$finished{$p}} = (exists $packalias->{$p})?$packalias->{$p}:$p;
 }
 print "Interesting:\n";
 for $t (sort {$a <=> $b} keys %inttimes) {
@@ -784,12 +800,10 @@ $in =~ s/\<NUMPACKS\>/$numpacks/sg;
 print "making longes table\n";
 $colspan = $lastfincols * 3 + 1;
 $ltab = "<table cellpadding=0 cellspacing=0 border=0>\n<tr>\n<td colspan=$colspan width=1 bgcolor=\"#336699\"><img src=void.gif width=1 height=1 border=0></td>\n</tr>\n";
-#for $lf (reverse @longest) {
-@lf = @longest;
-{
+for $lf (reverse @longest) {
   $ltab .= "<tr>\n";
-  unshift @lf, '' while @lf < $lastfincols;
-  for $q (reverse @lf) {
+  unshift @$lf, '' while @$lf < $lastfincols;
+  for $q (@$lf) {
     $ltab .= "<td width=1 bgcolor=\"#336699\"><img src=\"void.gif\" width=1 height=18 border=0></td>\n";
     if ($q ne '') {
       $q = $packalias->{$q} if $packalias->{$q};
