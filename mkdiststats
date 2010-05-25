@@ -12,6 +12,9 @@ Getopt::Long::Configure("no_ignore_case");
 my $width = 1000;
 my $height = 450;
 
+# assume this build time if none available
+my $default_build_time = 3333;
+
 my $opt_justgraph;
 my $opt_interesting;
 my $opt_allinteresting;
@@ -139,7 +142,7 @@ sub handle_start($)
   my $tb = $endtime - $readytime;
 
   if ($attrs{"code"} eq "failed") {
-      print "FAILED: $package $t $ti $tb\n";
+      #print "FAILED: $package $t $ti $tb\n";
       if (!exists $failed{$package} || $failed{$package} < $t) {
 	  $failed{$package} = $t;
       }
@@ -165,15 +168,15 @@ for $pack (@packs_to_setup) {
   if (!$packmin{$pack}) {
     if ($failed{$pack}) {
 	$packmin{$pack} = $failed{$pack};
-	if ($packmin{$pack} < 300) {
-	    print STDERR "$pack failed quickly, assuming five minutes\n";
-	    $packmin{$pack} = 300;
+	if ($packmin{$pack} < $default_build_time) {
+	    print STDERR "$pack failed quickly, using default time\n";
+	    $packmin{$pack} = $default_build_time;
 	} else {
-	    print STDERR "$pack failed, guessing time\n";
+	    print STDERR "$pack failed, using default time\n";
 	}
     } else {
-	print STDERR "unknown build time for $pack\n";
-	$packmin{$pack} = 300;
+	print STDERR "$pack never built, using default time\n";
+	$packmin{$pack} = $default_build_time;
     }
   }
 }
