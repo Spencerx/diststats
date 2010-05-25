@@ -398,7 +398,7 @@ print "calculating reverse graph ...\n";
 use Dfs;
 my $dfs = new Dfs(\%pdeps);
 for my $cycle (keys %cycles) {
-    $dfs->{'nodes'}->{$cycle} = [];
+    $self->{'nodes'}->{$cycle} = [] unless exists $self->{'nodes'}->{$cycle};
 }
 $dfs->startrdfs(@todo);
 #print Dumper($dfs->{'reversedgraph'});
@@ -576,8 +576,8 @@ print "simulation done after $now secs\n";
 
 open(FOO, '>', "$ddir/simul");
 print FOO Data::Dumper->Dump(
-    [$numpacks, \%nbuild, \%nwait, \%needed, \%packmin_m],
-    [qw/numpacks *nbuild   *nwait   *needed   *packmin_m/]);
+    [$numpacks, \%nbuild, \%nwait, \%needed, \%packmin_m, \%finished],
+    [qw/numpacks *nbuild   *nwait   *needed   *packmin_m   *finished/]);
 close FOO;
 
 my $last;
