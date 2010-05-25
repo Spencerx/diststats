@@ -8,6 +8,7 @@ use Time::Local 'timelocal_nocheck';
 use Getopt::Long;
 Getopt::Long::Configure("no_ignore_case");
 
+# graph dimensions
 my $width = 1000;
 my $height = 450;
 
@@ -652,7 +653,7 @@ print "Last finished:\n";
 for $p (keys %longest) {
   # skip package with short build time that doesn't trigger many
   # other packages
-  next if !$opt_allinteresting && $packmin{$p} < 500 && $needed{$p} < 20;
+  next if !$opt_allinteresting && $packmin{$p} < 900 && $needed{$p} < 20;
   $inttimes{$finished{$p}} = (exists $packalias->{$p})?$packalias->{$p}:$p;
 }
 print "Interesting:\n";
