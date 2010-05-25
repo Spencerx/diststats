@@ -388,6 +388,10 @@ for $p (keys %pdeps) {
   $pdeps{$p} = [@deps];
 }
 
+for my $cycle (keys %cycles) {
+    $pdeps{$cycle} = [] unless $pdeps{$cycle};
+}
+
 open(FOO, '>', "$ddir/deps");
 print FOO Data::Dumper->Dump(
     [$firstcycle, \%pdeps, \%packmin, \%cycles],
@@ -397,11 +401,10 @@ close FOO;
 print "calculating reverse graph ...\n";
 use Dfs;
 my $dfs = new Dfs(\%pdeps);
-for my $cycle (keys %cycles) {
-    $self->{'nodes'}->{$cycle} = [] unless exists $self->{'nodes'}->{$cycle};
-}
 $dfs->startrdfs(@todo);
+#print Dumper(\@todo);
 #print Dumper($dfs->{'reversedgraph'});
+#print Dumper($dfs->{'reverseorder'});
 
 %deppath = ();
 
@@ -580,6 +583,27 @@ print FOO Data::Dumper->Dump(
     [qw/numpacks *nbuild   *nwait   *needed   *packmin_m   *finished/]);
 close FOO;
 
+#print Dumper(\@longest);
+
+drawgraph:
+if ($opt_justgraph) {
+    open(FOO, '<', "$ddir/deps") || die "$!";
+    eval join('', <FOO>);
+    close FOO;
+    open(FOO, '<', "$ddir/simul") || die "$!";
+    eval join('', <FOO>);
+    close FOO;
+    $maxnbuild = 0;
+    $ti = 0;
+    for (keys %nbuild) {
+	$maxnbuild = $nbuild{$_} if ($maxnbuild < $nbuild{$_});
+	$ti = $_ if ($ti < $_);
+    }
+}
+
+my $packalias = {};
+$packalias->{$firstcycle} = 'basepacks' if $firstcycle;
+
 my $last;
 for my $p (keys %finished) {
   if (!$last) {
@@ -603,21 +627,6 @@ while(1) {
     $l = $dep if $finished{$l} < $finished{$dep};
   }
   $last = $l;
-}
-
-#print Dumper(\@longest);
-
-drawgraph:
-if ($opt_justgraph) {
-    open(FOO, '<', "$ddir/simul") || die "$!";
-    eval join('', <FOO>);
-    close FOO;
-    $maxnbuild = 0;
-    $ti = 0;
-    for (keys %nbuild) {
-	$maxnbuild = $nbuild{$_} if ($maxnbuild < $nbuild{$_});
-	$ti = $_ if ($ti < $_);
-    }
 }
 
 %inttimes = ();
@@ -774,16 +783,17 @@ $in =~ s/\<NUMPACKS\>/$numpacks/sg;
 print "making longes table\n";
 $colspan = $lastfincols * 3 + 1;
 $ltab = "<table cellpadding=0 cellspacing=0 border=0>\n<tr>\n<td colspan=$colspan width=1 bgcolor=\"#336699\"><img src=void.gif width=1 height=1 border=0></td>\n</tr>\n";
-for $lf (reverse @interesting) {
+#for $lf (reverse @longest) {
+@lf = @longest;
+{
   $ltab .= "<tr>\n";
-  @lf = split(' ', $lf);
-  shift @lf;
   unshift @lf, '' while @lf < $lastfincols;
   for $q (reverse @lf) {
     $ltab .= "<td width=1 bgcolor=\"#336699\"><img src=\"void.gif\" width=1 height=18 border=0></td>\n";
-    if ($q =~ /^(.*)\((.*)\)$/) {
-      $ltab .= "<td>&nbsp;$1:</td>\n";
-      $h=hhmm($2);
+    if ($q ne '') {
+      $q = $packalias->{$q} if $packalias->{$q};
+      $ltab .= "<td>&nbsp;$q:</td>\n";
+      $h=hhmm($packmin{$q});
       $ltab .= "<td align=right>&nbsp;$h&nbsp;</td>\n";
     } else {
       $ltab .= "<td>&nbsp;</td><td>&nbsp;</td>\n";
