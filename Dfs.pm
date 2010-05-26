@@ -148,7 +148,7 @@ sub rdfsvisit
 	elsif(!exists $self->{'endtime'}->{$p})
 	{
 	    print STDERR "dependency loop: $k -> $p\n";
-	    $self->{'backwardedges'}->{$k}=$p;
+	    push @{$self->{'backwardedges'}->{$k}}, $p;
 	}
 	else
 	{

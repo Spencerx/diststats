@@ -218,6 +218,12 @@ for $p (@todo) {
   }
 }
 
+open(FOO, '>', "$ddir/dep1");
+print FOO Data::Dumper->Dump(
+    [\%pdeps],
+    [qw/*pdeps/]);
+close FOO;
+
 @basepacks = map {$subpack2pack{$_} || $_} @basesubpacks;
 %basepacks = map {$_ => 1} @basepacks;
 
