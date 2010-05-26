@@ -169,13 +169,13 @@ for $pack (@packs_to_setup) {
     if ($failed{$pack}) {
 	$packmin{$pack} = $failed{$pack};
 	if ($packmin{$pack} < $default_build_time) {
-	    print STDERR "$pack failed quickly, using default time\n";
+	    print "$pack failed quickly, using default time\n";
 	    $packmin{$pack} = $default_build_time;
 	} else {
-	    print STDERR "$pack failed, using default time\n";
+	    print "$pack failed, using default time\n";
 	}
     } else {
-	print STDERR "$pack never built, using default time\n";
+	print "$pack never built, using default time\n";
 	$packmin{$pack} = $default_build_time;
     }
   }
@@ -379,28 +379,32 @@ $nbuild = 0;
 $firstcycle = ($todo[0] =~ /,/) ? $todo[0] : '';
 print "first cycle: $firstcycle\n";
 
-my %cycles;
 for $p (keys %pdeps) {
+  # ensure each dep is only listed once
   @deps = unify(@{$pdeps{$p}});
-  # prepare arrays for cycles so we don't need to split them in
-  # inner loop later
   for $dep (@deps) {
+    next if exists $packmin{$dep};
     @c = split(/,/, $dep);
+    # calculate build time for cycles
     if (@c > 1) {
-      $cycles{$dep} = [@c];
+      $eti = 0;
+      # twice the time of the longest package
+      for (@c) {
+	$eti = $packmin{$_} if $eti < $packmin{$_};
+      }
+      $eti *= 2;
+      $packmin{$dep} = $eti;
+      print "cycle $dep: ".hhmm($eti)."\n";
+      $pdeps{$dep} = [] unless $pdeps{$dep};
     }
   }
   $pdeps{$p} = [@deps];
 }
 
-for my $cycle (keys %cycles) {
-    $pdeps{$cycle} = [] unless $pdeps{$cycle};
-}
-
 open(FOO, '>', "$ddir/deps");
 print FOO Data::Dumper->Dump(
-    [$firstcycle, \%pdeps, \%packmin, \%cycles],
-    [qw/firstcycle  *pdeps   *packmin   *cycles /]);
+    [$firstcycle, \%pdeps, \%packmin],
+    [qw/firstcycle  *pdeps   *packmin/]);
 close FOO;
 
 print "calculating reverse graph ...\n";
@@ -460,14 +464,7 @@ while ($nwait || $nbuild)
   my $i = 0;
   for my $p (splice @todo) {
     my $eti = 0;
-    if ($cycles{$p}) {
-      for (@{$cycles{$p}}) {
-	$eti = $packmin{$_} if $eti < $packmin{$_};
-      }
-      $eti *= 2;
-    } else {
-      $eti = $packmin{$p};
-    }
+    $eti = $packmin{$p};
     $eti += $ti;
     print "$ti: starting $p, will finish at $eti\n" if $verbose;
     $building{$eti} = [] unless exists $building{$eti};
