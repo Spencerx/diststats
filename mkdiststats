@@ -43,15 +43,10 @@ my %packmin_m;
 my %packmin;
 my %pdeps;
 my @todo;
-my %unknowndep;
-my @unknowndep;
-my %nearly_alls;
 my %known;
 my %done;
 my %needed;
 my @basesubpacks;
-my @basepacks;
-my %basepacks;
 my @done;
 
 sub unify {
@@ -231,25 +226,17 @@ for $pack (@packs_to_setup) {
 
 @todo = @packs_to_setup;
 
-%unknowndep = ();
-@unknowndep = ();
-%nearly_alls = ();
-
 %known = map {$_ => 1} @todo;
 %done = ();
 @done = ();
-%needed = ();
+%needed = map {$_ => 0} @todo;
 for my $p (@todo) {
   next unless $pdeps{$p};
   for (@{$pdeps{$p}}) {
     if ($known{$_}) {
       $needed{$_}++;
     } else {
-      $nearly_alls{$p} = 1 if $_ eq 'nearly-all';
-      $unknowndep{$_} = [] unless $unknowndep{$_};
-      push @{$unknowndep{$_}}, $p;
       $done{$_} = 1;
-      push @unknowndep, $_;
     }
   }
 }
@@ -272,42 +259,10 @@ print FOO Data::Dumper->Dump(
     [qw/*subpack2pack/]);
 close FOO;
 
-
-@basepacks = map {$subpack2pack{$_} || $_} @basesubpacks;
-%basepacks = map {$_ => 1} @basepacks;
-
-# pre-sort ?
-#@todo = sort {$needed{$b} <=> $needed{$a} || $a cmp $b} @todo;
-
 my $numpacks = @todo;
 
-# unify all basepacks
-if (@basepacks) {
-  my $cycle = join(',', sort @basepacks);
-  for my $p (@todo) {
-    next unless $pdeps{$p};
-    for (@{$pdeps{$p}}) {
-      $_ = $cycle if $basepacks{$_};
-    }
-  }
-  my @mdeps = ();
-  for my $p (@basepacks) {
-    next unless $pdeps{$p};
-    push @mdeps, grep {$_ ne $cycle} @{$pdeps{$p}};
-  }
-  @mdeps = ();
-  @mdeps = unify(@mdeps);
-  $pdeps{$cycle} = [ @mdeps ] if @mdeps;
-  my $mneeded = 0;
-  for (@basepacks) {
-    $mneeded = $needed{$_} if $needed{$_} > $mneeded;
-  }
-  $needed{$cycle} = $mneeded;
-
-  # put basepacks in front
-  @todo = grep {!$basepacks{$_}} @todo;
-  unshift @todo, $cycle;
-} else {
+# put autoconf to front
+{
   my $n = @todo;
   @todo = grep {$_ ne 'autoconf'} @todo;
   unshift @todo, 'autoconf' if $n != @todo;
@@ -401,13 +356,8 @@ while (@todo) {
 $now = time-$now;
 print "done sorting in $now secs\n";
 
-# put nearly alls to back
-my @nas = grep {$nearly_alls{$_}} @done;
-@done = grep {!$nearly_alls{$_}} @done;
-push @done, @nas;
-
 # put autoconf cycle to front
-if (!@basepacks) {
+if (1) {
   my @ac = grep {",$_," =~ /,autoconf,/ } @done;
   if (@ac) {
     die if @ac > 1;
@@ -426,7 +376,6 @@ for $pack (split(',', $done[0])) {
 
 @todo = @done;
 %done = ();
-$done{$_} = 2 for @unknowndep;
 @done = ();
 
 my $ti = 0;
