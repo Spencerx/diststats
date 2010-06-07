@@ -1,6 +1,7 @@
-#!/usr/bin/perl
+#!/usr/bin/perl -w
 
 use POSIX;
+use strict;
 
 use GD;
 use Time::Local 'timelocal_nocheck';
@@ -32,6 +33,27 @@ GetOptions (
     'maxiter' => \$maxiter,
 ) or exit(1);
 
+
+my %subpacks;
+my @packs_to_setup;
+my %deps;
+my %subpack2pack;
+my %failed;
+my %packmin_m;
+my %packmin;
+my %pdeps;
+my @todo;
+my %unknowndep;
+my @unknowndep;
+my %nearly_alls;
+my %known;
+my %done;
+my %needed;
+my @basesubpacks;
+my @basepacks;
+my %basepacks;
+my @done;
+
 sub unify {
     my %h = map {$_ => 1} @_;
     return grep(delete($h{$_}), @_);
@@ -46,8 +68,8 @@ sub hhmm {
 my $dist = shift @ARGV;
 die("No dist specified!\n") unless $dist ne '';
 
-$templdir = ".";
-$ddir = $dist;
+my $templdir = ".";
+my $ddir = $dist;
 $ddir =~ s,/,::,g;
 mkdir "output", 0755;
 $ddir = "output/$ddir";
@@ -62,22 +84,21 @@ goto drawgraph if $opt_justgraph;
 open(LASTFIN, '>', $lastfinfn);
 
 my $pack = undef;
-my $text = undef;
+my $text = '';
 
 sub handle_builddep($)
   {
       my $self = shift;
-      my $tag = shift;
-      my %attrs = {};
-      while (my $attr = shift) {
-        $attrs{$attr} = shift;
-      }
-      if ($tag eq 'package') {
+      my $name = shift;
+      my %attrs = @_;
+      if ($name eq 'package' && exists $attrs{"name"}) {
 	$pack = $attrs{"name"};
 	my @array;
         $deps{$pack} = [ @array ];	
         $subpacks{$pack} = [ @array ];
         push @packs_to_setup, $pack;
+      } elsif ($name eq 'pkgdep' || $name eq 'subpkg') {
+	$text = '';
       }
       return;
 }
@@ -94,11 +115,12 @@ sub handle_end_builddep($)
     $subpack2pack{$text} = $pack;
     return;
   }
+  $text = '';
 }
 
 sub handle_ch_builddep($) {
    my $sef = shift;
-   $text = shift;
+   $text .= shift;
 }
 
 require XML::Parser;
@@ -112,9 +134,7 @@ if (! -e $fn) {
 print "parsing build deps ...\n";
 $pdep->parsefile($fn, ProtocolEncoding => 'UTF-8');
 
-$now = time;
-$now_m = POSIX::strftime("%Y-%m-%d", localtime($now - 30 * 24 * 3600));
-$now_a = POSIX::strftime("%Y-%m-%d", localtime($now - 90 * 24 * 3600));
+my $now = time;
 
 #goto nixda;
 
@@ -126,10 +146,7 @@ sub handle_start($)
       my $self = shift;
       my $tag = shift;
       return unless ($tag eq 'jobhist');
-      my %attrs = {};
-      while (my $attr = shift) {
-        $attrs{$attr} = shift;
-      }
+      my %attrs = @_;
       #print Dumper(\%attrs) . "\n";
       my $package = $attrs{"package"};
       my $client = $attrs{"workerid"};
@@ -148,10 +165,10 @@ sub handle_start($)
       }
       return;
   }
-  if (!$packmin_m{$package} || $packmin_m{$package}->[0] > $t) {
+  if (!exists $packmin_m{$package} || $packmin_m{$package}->[0] > $t) {
     $packmin_m{$package} = [$t, $ti, $tb];
   }
-  return unless !$packmin{$package} || $packmin{$package} > $t || $starttime le $now_a;
+  return unless !$packmin{$package} || $packmin{$package} > $t;
   $packmin{$package} = $t;
   }
 
@@ -190,7 +207,26 @@ for $pack (@packs_to_setup) {
 print "calculating dependencies...\n";
 # map dependencies to real packages, ignore - deps, filter out self
 for $pack (@packs_to_setup) {
-  $pdeps{$pack} = [ unify(grep {$_ ne $pack} map {$subpack2pack{$_} || ()} grep {!/^-/} @{$deps{$pack} || []}) ];
+  #$pdeps{$pack} = [ unify(grep {$_ ne $pack} map {$subpack2pack{$_} || ()} grep {!/^-/} @{$deps{$pack} || []}) ];
+  my @dl;
+  for my $dep (@{$deps{$pack}}) {
+    next if substr($dep,0,1) eq '-';
+    if (!exists $subpack2pack{$dep}) {
+      # could be versioned dep. throw away the version
+      $dep =~ s/ .*//;
+      if (!exists $subpack2pack{$dep}) {
+	print "$pack: broken dep $dep\n";
+	next;
+      }
+    }
+    $dep = $subpack2pack{$dep};
+    if ($pack eq $dep) {
+      print "$pack: self req\n";
+      next;
+    }
+    push @dl, $dep;
+  }
+  $pdeps{$pack} = [ unify @dl ];
 }
 
 @todo = @packs_to_setup;
@@ -203,7 +239,7 @@ for $pack (@packs_to_setup) {
 %done = ();
 @done = ();
 %needed = ();
-for $p (@todo) {
+for my $p (@todo) {
   next unless $pdeps{$p};
   for (@{$pdeps{$p}}) {
     if ($known{$_}) {
@@ -224,32 +260,45 @@ print FOO Data::Dumper->Dump(
     [qw/*pdeps/]);
 close FOO;
 
+open(FOO, '>', "$ddir/dep2");
+print FOO Data::Dumper->Dump(
+    [\%deps],
+    [qw/*deps/]);
+close FOO;
+
+open(FOO, '>', "$ddir/dep3");
+print FOO Data::Dumper->Dump(
+    [\%subpack2pack],
+    [qw/*subpack2pack/]);
+close FOO;
+
+
 @basepacks = map {$subpack2pack{$_} || $_} @basesubpacks;
 %basepacks = map {$_ => 1} @basepacks;
 
 # pre-sort ?
-@todo = sort {$needed{$b} <=> $needed{$a} || $a cmp $b} @todo;
+#@todo = sort {$needed{$b} <=> $needed{$a} || $a cmp $b} @todo;
 
-$numpacks = @todo;
+my $numpacks = @todo;
 
 # unify all basepacks
 if (@basepacks) {
-  $cycle = join(',', sort @basepacks);
-  for $p (@todo) {
+  my $cycle = join(',', sort @basepacks);
+  for my $p (@todo) {
     next unless $pdeps{$p};
     for (@{$pdeps{$p}}) {
       $_ = $cycle if $basepacks{$_};
     }
   }
-  @mdeps = ();
-  for $p (@basepacks) {
+  my @mdeps = ();
+  for my $p (@basepacks) {
     next unless $pdeps{$p};
     push @mdeps, grep {$_ ne $cycle} @{$pdeps{$p}};
   }
   @mdeps = ();
   @mdeps = unify(@mdeps);
   $pdeps{$cycle} = [ @mdeps ] if @mdeps;
-  $mneeded = 0;
+  my $mneeded = 0;
   for (@basepacks) {
     $mneeded = $needed{$_} if $needed{$_} > $mneeded;
   }
@@ -267,12 +316,13 @@ if (@basepacks) {
 print "sorting ...\n";
 $now = time;
 
+my %need;
 # sort everything
 while (@todo) {
-  $firsttodo = $todo[0];
+  my $firsttodo = $todo[0];
   %need = ($firsttodo => 1) unless %need;
-  $one = 0;
-  for $p (splice @todo) {
+  my $one = 0;
+  for my $p (splice @todo) {
     if (!$need{$p}) {
       push @todo, $p;
       next;
@@ -291,14 +341,14 @@ while (@todo) {
     %need = () if $p eq $firsttodo;
   }
   if (!$one) {
-    @circtest = sort {$needed{$b} <=> $needed{$a}} grep {$need{$_}} @todo;
-    @cyclefound = ();
+    my @circtest = sort {$needed{$b} <=> $needed{$a}} grep {$need{$_}} @todo;
+    my @cyclefound = ();
   circloop:
-    while ($p = shift @circtest) {
-      @circ = ($p); 
-      %circ = ($p => [$p]);
+    while (my $p = shift @circtest) {
+      my @circ = ($p); 
+      my %circ = ($p => [$p]);
       while (@circ) {
-        for $c (splice @circ) {
+        for my $c (splice @circ) {
           for (@{$pdeps{$c} || []}) {
             next if $done{$_};
             if ($_ eq $p) {
@@ -320,24 +370,24 @@ while (@todo) {
     #}
 
     # unify cycle
-    @cycle = map {split(',', $_)} sort @cyclefound;
-    $cycle = join(',', @cycle);
-    %cyclefound = map {$_ => 1} @cyclefound;
-    for $p (@todo) {
+    my @cycle = map {split(',', $_)} sort @cyclefound;
+    my $cycle = join(',', @cycle);
+    my %cyclefound = map {$_ => 1} @cyclefound;
+    for my $p (@todo) {
       next unless $pdeps{$p};
       for (@{$pdeps{$p}}) {
         $_ = $cycle if $cyclefound{$_};
       }
     }
-    @mdeps = ();
-    for $p (@cyclefound) {
+    my @mdeps = ();
+    for my $p (@cyclefound) {
       die if $p eq 'nearly-all';
       next unless $pdeps{$p};
       push @mdeps, grep {$_ ne $cycle} @{$pdeps{$p}};
     }
     @mdeps = unify(@mdeps);
     $pdeps{$cycle} = [ @mdeps ] if @mdeps;
-    $mneeded = 0;
+    my $mneeded = 0;
     for (@cyclefound) {
       $mneeded = $needed{$_} if $needed{$_} > $mneeded;
     }
@@ -352,13 +402,13 @@ $now = time-$now;
 print "done sorting in $now secs\n";
 
 # put nearly alls to back
-@nas = grep {$nearly_alls{$_}} @done;
+my @nas = grep {$nearly_alls{$_}} @done;
 @done = grep {!$nearly_alls{$_}} @done;
 push @done, @nas;
 
 # put autoconf cycle to front
 if (!@basepacks) {
-  @ac = grep {",$_," =~ /,autoconf,/ } @done;
+  my @ac = grep {",$_," =~ /,autoconf,/ } @done;
   if (@ac) {
     die if @ac > 1;
     if ($done[0] ne $ac[0]) {
@@ -379,21 +429,21 @@ for $pack (split(',', $done[0])) {
 $done{$_} = 2 for @unknowndep;
 @done = ();
 
-$ti = 0;
-$nbuild = 0;
+my $ti = 0;
+my $nbuild = 0;
 # die unless $todo[0] =~ /,/;
-$firstcycle = ($todo[0] =~ /,/) ? $todo[0] : '';
+my $firstcycle = ($todo[0] =~ /,/) ? $todo[0] : '';
 print "first cycle: $firstcycle\n";
 
-for $p (keys %pdeps) {
+for my $p (keys %pdeps) {
   # ensure each dep is only listed once
-  @deps = unify(@{$pdeps{$p}});
-  for $dep (@deps) {
+  my @deps = unify(@{$pdeps{$p}});
+  for my $dep (@deps) {
     next if exists $packmin{$dep};
-    @c = split(/,/, $dep);
+    my @c = split(/,/, $dep);
     # calculate build time for cycles
     if (@c > 1) {
-      $eti = 0;
+      my $eti = 0;
       # twice the time of the longest package
       for (@c) {
 	$eti = $packmin{$_} if $eti < $packmin{$_};
@@ -421,16 +471,16 @@ $dfs->startrdfs(@todo);
 #print Dumper($dfs->{'reversedgraph'});
 #print Dumper($dfs->{'reverseorder'});
 
-%deppath = ();
+#%deppath = ();
 
-%nbuild = ();
-%nwait = ();
-$maxnbuild = 0;
+my %nbuild = ();
+my %nwait = ();
+my $maxnbuild = 0;
 
 $now = time;
-$cnt = 0;
+my $cnt = 0;
 
-$nwait = @todo;
+my $nwait = @todo;
 for my $p (splice @todo) {
     if($dfs->{'reverseorder'}->{$p}==0) {
 	push @todo, $p;
@@ -458,7 +508,7 @@ while ($nwait || $nbuild)
 	$dfs->{'reverseorder'}->{$dep}--;
 	push @todo, $dep if $dfs->{'reverseorder'}->{$dep} == 0;
       }
-      delete $dfs->{'reverseorder'}->{$node};
+      delete $dfs->{'reverseorder'}->{$p};
     }
     delete $building{$ti};
   }
@@ -487,7 +537,7 @@ while ($nwait || $nbuild)
   }
 
   my $nextti = 0;
-  for $t (keys %building) {
+  for my $t (keys %building) {
     if (!$nextti) {
       $nextti = $t;
       next;
@@ -614,7 +664,7 @@ my $packalias = {};
 $packalias->{$firstcycle} = 'basepacks' if $firstcycle;
 for my $p (@done) {
   next unless $p =~ /^OpenOffice_org/;
-  $q = $p;
+  my $q = $p;
   $q =~ s/OpenOffice_org/OOo/;
   $packalias->{$p} = $q;
 }
@@ -633,7 +683,7 @@ my $i = 0;
 my $lastfincols = 0;
 for my $p (reverse @$last) {
   next if exists $longest{$p};
-  $path = [];
+  my $path = [];
   while(1) {
     push @$path, $p;
     $longest{$p} = 1;
@@ -654,30 +704,32 @@ for my $p (reverse @$last) {
   last unless $opt_interesting || $i < 10;
 }
 
-%inttimes = ();
+my %inttimes = ();
 print "Last finished:\n";
-for $p (keys %longest) {
+for my $p (keys %longest) {
   # skip package with short build time that doesn't trigger many
   # other packages
   next if !$opt_allinteresting && $packmin{$p} < 900 && $needed{$p} < 20;
   $inttimes{$finished{$p}} = (exists $packalias->{$p})?$packalias->{$p}:$p;
 }
 print "Interesting:\n";
-for $t (sort {$a <=> $b} keys %inttimes) {
+for my $t (sort {$a <=> $b} keys %inttimes) {
   print "$t: $inttimes{$t}\n";
 }
 
-$nn = $maxnbuild * 1.2;
+no strict;
+
+my $nn = $maxnbuild * 1.2;
 $nn = $numpacks if $numpacks < $nn;
 
 my $yaxisround;
 $yaxisround = $nn > 200 ? 100 : 10;
 
-$xaxisend = int(($ti + 3600 - 1) / 3600) * 3600;
-$yaxisend = int(($nn + $yaxisround - 1) / $yaxisround) * $yaxisround;
-$xaxisstep = int($xaxisend / 12);
+my $xaxisend = int(($ti + 3600 - 1) / 3600) * 3600;
+my $yaxisend = int(($nn + $yaxisround - 1) / $yaxisround) * $yaxisround;
+my $xaxisstep = int($xaxisend / 12);
 $xaxisstep = int(($xaxisstep + 3600 - 1) / 3600) * 3600;
-$yaxisstep = int($yaxisend / 10);
+my $yaxisstep = int($yaxisend / 10);
 $yaxisstep = int(($yaxisstep + $yaxisround / 2 - 1) / $yaxisround) * $yaxisround;
 $yaxisstep = $yaxisround == $yaxisend ? $yaxisround / 5 : $yaxisround unless $yaxisstep;
 $xaxisstep = int($xaxisstep / 4);
@@ -685,27 +737,27 @@ $yaxisstep = int($yaxisstep / 5);
 $yaxisstep = 1 unless $yaxisstep;
 
 my $image = new GD::Image($width, $height);
-$black = $image->colorAllocate (0, 0, 0);
-$white = $image->colorAllocate (0xff, 0xff, 0xff);
-$blue = $image->colorAllocate (0, 0, 255);
-$lblue = $image->colorAllocate (110, 200, 255);
+my $black = $image->colorAllocate (0, 0, 0);
+my $white = $image->colorAllocate (0xff, 0xff, 0xff);
+my $blue = $image->colorAllocate (0, 0, 255);
+my $lblue = $image->colorAllocate (110, 200, 255);
 my $gray    = $image->colorAllocate (128, 128, 128);
 #my $grayd   = $image->colorAllocate (64, 64, 64);
-$grayd = $black;
+my $grayd = $black;
 my $back    = $image->colorAllocate (0xee, 0xee, 0xee);
 my $red     = $image->colorAllocate (255,   0,   0);
 $image->filledRectangle (0, 0, $width - 1, $height - 1, $back);
-$ixoff = 60;
-$iyoff = 30;
+my $ixoff = 60;
+my $iyoff = 30;
 my $SmallFontWidth = gdSmallFont->width;
 my $SmallFontHeight = gdSmallFont->height;
-$iw = $width - $ixoff - 20;
-$ih = $height - $iyoff - $SmallFontHeight * 6;
+my $iw = $width - $ixoff - 20;
+my $ih = $height - $iyoff - $SmallFontHeight * 6;
 
 
 $image->filledRectangle ($ixoff, $iyoff, $ixoff + $iw - 1, $iyoff +$ih - 1, $white);
 
-$ox = 0;
+my $ox = 0;
 for $t (sort {$a <=> $b} keys %nbuild) {
   $x = $ixoff + int($iw / $xaxisend * $t);
   $y1 = $iyoff + $ih - 1 - int($ih / $yaxisend * ($nbuild{$t} + $nwait{$t}));
