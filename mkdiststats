@@ -127,13 +127,14 @@ if (! -e $fn) {
 	system("osc api '/build/$dist/_builddepinfo' > $fn");
 }
 print "parsing build deps ...\n";
+my $now = time;
 $pdep->parsefile($fn, ProtocolEncoding => 'UTF-8');
 
-my $now = time;
+$now = time-$now;
+print "done in $now secs\n";
+
 
 #goto nixda;
-
-%failed;
 
 use Data::Dumper;
 sub handle_start($)
@@ -174,7 +175,11 @@ if (! -e $fn) {
 }
 my $p1 = new XML::Parser( Handlers => {Start => \&handle_start});
 print "parsing jobhistory...\n";
+$now = time;
 $p1->parsefile($fn, ProtocolEncoding => 'UTF-8');
+
+$now = time-$now;
+print "done in $now secs\n";
 
 for $pack (@packs_to_setup) {
   if (!$packmin{$pack}) {
@@ -193,12 +198,16 @@ for $pack (@packs_to_setup) {
   }
 }
 
+$now = time-$now;
+print "done in $now secs\n";
+
 #######################################################################
 #######################################################################
 ###
 ###  Sort specfiles
 ###
 
+$now = time;
 print "calculating dependencies...\n";
 # map dependencies to real packages, ignore - deps, filter out self
 for $pack (@packs_to_setup) {
@@ -226,20 +235,11 @@ for $pack (@packs_to_setup) {
 
 @todo = @packs_to_setup;
 
-%known = map {$_ => 1} @todo;
 %done = ();
 @done = ();
-%needed = map {$_ => 0} @todo;
-for my $p (@todo) {
-  next unless $pdeps{$p};
-  for (@{$pdeps{$p}}) {
-    if ($known{$_}) {
-      $needed{$_}++;
-    } else {
-      $done{$_} = 1;
-    }
-  }
-}
+
+$now = time-$now;
+print "done in $now secs\n";
 
 open(FOO, '>', "$ddir/dep1");
 print FOO Data::Dumper->Dump(
@@ -261,164 +261,154 @@ close FOO;
 
 my $numpacks = @todo;
 
-# put autoconf to front
-{
-  my $n = @todo;
-  @todo = grep {$_ ne 'autoconf'} @todo;
-  unshift @todo, 'autoconf' if $n != @todo;
-}
-
-print "sorting ...\n";
+print "computing dependency graph ...\n";
 $now = time;
 
-my %need;
-# sort everything
-while (@todo) {
-  my $firsttodo = $todo[0];
-  %need = ($firsttodo => 1) unless %need;
-  my $one = 0;
-  for my $p (splice @todo) {
-    if (!$need{$p}) {
-      push @todo, $p;
-      next;
-    }
-    if ($pdeps{$p} && grep {!$done{$_}} @{$pdeps{$p}}) {
-      for (@{$pdeps{$p}}) {
-	$one = 1 if $need{$_}++ == 0;
-      }
-      push @todo, $p;
-      next;
-    }
-    #print "$p\n";
-    push @done, $p;
-    $done{$p} = 1;
-    $one = 1;
-    %need = () if $p eq $firsttodo;
-  }
-  if (!$one) {
-    my @circtest = sort {$needed{$b} <=> $needed{$a}} grep {$need{$_}} @todo;
-    my @cyclefound = ();
-  circloop:
-    while (my $p = shift @circtest) {
-      my @circ = ($p); 
-      my %circ = ($p => [$p]);
-      while (@circ) {
-        for my $c (splice @circ) {
-          for (@{$pdeps{$c} || []}) {
-            next if $done{$_};
-            if ($_ eq $p) {
-	      @cyclefound= @{$circ{$c}};
-              last circloop;
-            }
-            next if exists $circ{$_};
-            push @circ, $_;
-            $circ{$_} = [@{$circ{$c}}, $_];
-          }
-        }
-        @circ = unify(@circ);
-      }
-    }
-    die unless @cyclefound > 1;
-    #print "CYCLE:\n";
-    #for $p (@cyclefound) {
-    #  print "$p: @{$pdeps{$p}}\n";
-    #}
+use Dfs;
+my $dfs = new Dfs(\%pdeps);
+$dfs->startrdfs(@todo);
 
-    # unify cycle
-    my @cycle = map {split(',', $_)} sort @cyclefound;
-    my $cycle = join(',', @cycle);
-    my %cyclefound = map {$_ => 1} @cyclefound;
-    for my $p (@todo) {
-      next unless $pdeps{$p};
-      for (@{$pdeps{$p}}) {
-        $_ = $cycle if $cyclefound{$_};
-      }
-    }
-    my @mdeps = ();
-    for my $p (@cyclefound) {
-      die if $p eq 'nearly-all';
-      next unless $pdeps{$p};
-      push @mdeps, grep {$_ ne $cycle} @{$pdeps{$p}};
-    }
-    @mdeps = unify(@mdeps);
-    $pdeps{$cycle} = [ @mdeps ] if @mdeps;
-    my $mneeded = 0;
-    for (@cyclefound) {
-      $mneeded = $needed{$_} if $needed{$_} > $mneeded;
-    }
-    $needed{$cycle} = $mneeded;
-    @todo = map {$cyclefound{$_} ? $cycle : $_} @todo;
-    @todo = unify(@todo);
-    %need = ();
+$now = time-$now;
+print "done in $now secs\n";
+
+### cycle elimination
+#
+print "finding cycles ...\n";
+$now = time;
+my %cycles = $dfs->findcycles();
+# put all packages involved in a cycle in the hash,
+# calculate cycle build time
+for my $c (keys %cycles) {
+  my $cn = join(',', sort(@{$cycles{$c}}));
+#  $cycles{$cn} = $cycles{$c};
+  my $eti = 0;
+  for my $p (@{$cycles{$c}}) {
+    $cycles{$p} = $cn;
+    # find longest time
+    # FIXME: add all times
+    $eti = $packmin{$p} if $eti < $packmin{$p};
   }
+  # twice the time of the longest package
+  $eti *= 2;
+  $packmin{$cn} = $eti;
+}
+
+my %cycledeps; # collects deps of the packages of a cycle 
+for my $p (keys %pdeps) {
+  # replace dep to packages involved in a cycle to cycle dep
+  my %h = map {
+    # preserve deps of own cycle
+    if (!exists $cycles{$_}
+    || (exists $cycles{$p} && $cycles{$_} eq $cycles{$p})) {
+      $_ => 1;
+    } else {
+      $cycles{$_} => 1;
+    }
+  } @{$pdeps{$p}};
+
+  if (exists $cycles{$p}) {
+    push @{$cycledeps{$cycles{$p}}}, keys %h;
+  } else {
+    @{$pdeps{$p}} = keys %h;
+  }
+}
+# inject the cycles as package
+for my $p (keys %cycledeps) {
+  @{$pdeps{$p}} = grep {!exists $cycles{$_}} unify(@{$cycledeps{$p}});
 }
 
 $now = time-$now;
-print "done sorting in $now secs\n";
+print "done in $now secs\n";
 
-# put autoconf cycle to front
-if (1) {
-  my @ac = grep {",$_," =~ /,autoconf,/ } @done;
-  if (@ac) {
-    die if @ac > 1;
-    if ($done[0] ne $ac[0]) {
-      @done = grep {$_ ne $ac[0]} @done;
-      unshift @done, $ac[0];
-      $pdeps{$ac[0]} = [];
+open(FOO, '>', "$ddir/dep4");
+print FOO Data::Dumper->Dump(
+    [\%pdeps],
+    [qw/*pdeps/]);
+close FOO;
+
+my $firstcycle;
+if (exists $cycles{'autoconf'}) {
+  $firstcycle = $cycles{'autoconf'};
+  if ($verbose) {
+    print "Basepacks timings:\n";
+    for $pack (split(',', $cycles{'autoconf'})) {
+      print "$pack: $packmin{$pack}\n";
+    }
+    print "Total: ", hhmm($packmin{$cycles{'autoconf'}}),"\n";
+    print "first cycle: $firstcycle\n";
+  }
+}
+
+# remove packages involved in cycle from @todo, add cycle instead
+{
+  my %cycledone;
+  @todo = grep {
+    if (exists $cycles{$_}) {
+      if (exists $cycledone{$cycles{$_}}) {
+	0;
+      } else {
+	$cycledone{$cycles{$_}} = 1;
+	$_ = $cycles{$_};
+      }
+    } else {
+      1;
+    }
+  } @todo;
+}
+
+%known = map {$_ => 1} @todo;
+%needed = map {$_ => 0} @todo;
+for my $p (@todo) {
+  next unless $pdeps{$p};
+  for (@{$pdeps{$p}}) {
+    if ($known{$_}) {
+      $needed{$_}++;
+    } else {
+      $done{$_} = 1;
     }
   }
 }
 
-print "Basepacks timings:\n";
-for $pack (split(',', $done[0])) {
-  print "$pack: $packmin{$pack}\n";
-}
+# walk the now cycle free graph again
+$dfs = new Dfs(\%pdeps);
+$dfs->startrdfs(@todo);
+#print Dumper(\@todo);
+#print Dumper($dfs->{'reversedgraph'});
+#print Dumper($dfs->{'reverseorder'});
 
-@todo = @done;
 %done = ();
 @done = ();
 
 my $ti = 0;
 my $nbuild = 0;
-# die unless $todo[0] =~ /,/;
-my $firstcycle = ($todo[0] =~ /,/) ? $todo[0] : '';
-print "first cycle: $firstcycle\n";
 
-for my $p (keys %pdeps) {
-  # ensure each dep is only listed once
-  my @deps = unify(@{$pdeps{$p}});
-  for my $dep (@deps) {
-    next if exists $packmin{$dep};
-    my @c = split(/,/, $dep);
-    # calculate build time for cycles
-    if (@c > 1) {
-      my $eti = 0;
-      # twice the time of the longest package
-      for (@c) {
-	$eti = $packmin{$_} if $eti < $packmin{$_};
-      }
-      $eti *= 2;
-      $packmin{$dep} = $eti;
-      print "cycle $dep: ".hhmm($eti)."\n";
-      $pdeps{$dep} = [] unless $pdeps{$dep};
-    }
-  }
-  $pdeps{$p} = [@deps];
-}
+#for my $p (keys %pdeps) {
+#  # ensure each dep is only listed once
+#  my @deps = unify(@{$pdeps{$p}});
+#  for my $dep (@deps) {
+#    next if exists $packmin{$dep};
+#    my @c = split(/,/, $dep);
+#    # calculate build time for cycles
+#    if (@c > 1) {
+#      my $eti = 0;
+#      # twice the time of the longest package
+#      for (@c) {
+#	$eti = $packmin{$_} if $eti < $packmin{$_};
+#      }
+#      $eti *= 2;
+#      $packmin{$dep} = $eti;
+#      print "cycle $dep: ".hhmm($eti)."\n";
+#      $pdeps{$dep} = [] unless $pdeps{$dep};
+#    }
+#  }
+#  $pdeps{$p} = [@deps];
+#}
 
 open(FOO, '>', "$ddir/deps");
 print FOO Data::Dumper->Dump(
     [$firstcycle, \%pdeps, \%packmin],
     [qw/firstcycle  *pdeps   *packmin/]);
 close FOO;
-
-print "calculating reverse graph ...\n";
-use Dfs;
-my $dfs = new Dfs(\%pdeps);
-$dfs->startrdfs(@todo);
-#print Dumper(\@todo);
-#print Dumper($dfs->{'reversedgraph'});
-#print Dumper($dfs->{'reverseorder'});
 
 #%deppath = ();
 
@@ -654,7 +644,6 @@ for my $p (reverse @$last) {
 }
 
 my %inttimes = ();
-print "Last finished:\n";
 for my $p (keys %longest) {
   # skip package with short build time that doesn't trigger many
   # other packages

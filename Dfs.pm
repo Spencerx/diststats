@@ -147,7 +147,9 @@ sub rdfsvisit
 	}
 	elsif(!exists $self->{'endtime'}->{$p})
 	{
-	    print STDERR "dependency loop: $k -> $p\n";
+	    #my @l = ($p);
+	    #while ($self->{'parent'}->{$p}=$k;
+	    #print STDERR "dependency loop: $k -> $p\n";
 	    push @{$self->{'backwardedges'}->{$k}}, $p;
 	}
 	else
@@ -204,5 +206,49 @@ sub startrdfs
 	}
     }
 }
+
+sub _unify {
+    my %h = map {$_ => 1} @_;
+    return grep(delete($h{$_}), @_);
+}
+
+sub findcycles
+{
+    my $self = shift;
+    my @todo = @_?@_:keys %{$self->{'backwardedges'}};
+    my %cycles;
+    my %cyclepkgs;
+    for my $n (@todo) {
+	my @l = ($n);
+	my %b = map {
+	    $_ => 1;
+	} @{$self->{'backwardedges'}->{$n}};
+	# visit our parents
+	while (my $p = $self->{'parent'}->{$n}) {
+	    unshift @l, $p;
+	    # no need to visit parents that are not involved in the loop
+	    delete $b{$p} if exists($b{$p});
+	    last unless %b;
+	    $n = $p;
+	}
+	if (0) { # for debugging
+	    my $cycle = join(',', sort(@l));
+	    # can not happen
+	    #  print STDERR "cycle $cycle already seen\n" if $cycles{$cycle};
+	    $cycles{$cycle} = [@l];
+	} else {
+	    my $c = exists $cyclepkgs{$n}?$cyclepkgs{$n}:$n;
+	    push @{$cycles{$c}}, @l;
+	    for (@l) {
+		$cyclepkgs{$_} = $c;
+	    }
+	}
+    }
+    for (keys %cycles) {
+	$cycles{$_} = [ _unify(@{$cycles{$_}}) ];
+    }
+    return %cycles;
+}
+
 
 1;
