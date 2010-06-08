@@ -13,8 +13,8 @@ Getopt::Long::Configure("no_ignore_case");
 require XML::Parser;
 
 # graph dimensions
-my $width = 1000;
-my $height = 450;
+my $opt_width = 1000;
+my $opt_height = 450;
 
 # assume this build time if none available
 my $default_build_time = 3333;
@@ -42,6 +42,8 @@ GetOptions (
     'destdir=s' => \$ddir,
     'srcdir=s' => \$srcdir,
     'timing' => \$opt_timing,
+    'width=i' => \$opt_width,
+    'height=i' => \$opt_height,
 ) or exit(1);
 
 my %subpacks;
@@ -94,7 +96,11 @@ if (!$ddir) {
 
 die "$ddir must be a directory\n" unless -d $ddir;
 
-goto drawgraph if $opt_justgraph;
+if ($opt_justgraph) {
+  sub output;
+  output;
+  exit 0;
+}
 
 my $pack = undef;
 my $text = '';
@@ -466,187 +472,206 @@ while (my ($p, $ti) = each %finished) {
 }
 close OUT;
 
-drawgraph:
-if ($opt_justgraph) {
-  taskstart "reading deps";
-  open(IN, '<', "$ddir/deps") || die "$!";
-  while (<IN>) {
-    chomp;
-    my @a = split(/ /);
-    if ($a[0] eq 'f') {
-      $firstcycle = $a[1];
-    } elsif ($a[0] eq 'b') {
-      $buildtime{$a[1]} = $a[2];
-      $pdeps{$a[1]} = [@a[3 .. $#a]];
-      push @packs_to_setup, $a[1] unless $a[1] =~ /,/;
+sub output
+{
+  if ($opt_justgraph) {
+    taskstart "reading deps";
+    open(IN, '<', "$ddir/deps") || die "$!";
+    while (<IN>) {
+      chomp;
+      my @a = split(/ /);
+      if ($a[0] eq 'f') {
+	$firstcycle = $a[1];
+      } elsif ($a[0] eq 'b') {
+	$buildtime{$a[1]} = $a[2];
+	$pdeps{$a[1]} = [@a[3 .. $#a]];
+	push @packs_to_setup, $a[1] unless $a[1] =~ /,/;
+      }
+    }
+    close IN;
+    open(IN, '<', "$ddir/simul") || die "$!";
+    while (<IN>) {
+      chomp;
+      my @a = split(/ /);
+      if ($a[0] eq 'n') {
+	$numpacks = $a[1];
+      } elsif ($a[0] eq 't') {
+	$nbuild{$a[1]} = $a[2];
+	$nwait{$a[1]} = $a[3];
+      } elsif ($a[0] eq 'f') {
+	$finished{$a[1]} = $a[2];
+      }
+    }
+    @done = sort {$finished{$a} <=> $finished{$b}} keys %finished;
+    close IN;
+    for (keys %nbuild) {
+      $maxtime = $_ if ($maxtime < $_);
+    }
+    taskdone;
+  }
+
+  my $packalias = {};
+  $packalias->{$firstcycle} = 'basepacks' if $firstcycle;
+  for my $p (@done) {
+    next unless $p =~ /^OpenOffice_org/;
+    my $q = $p;
+    $q =~ s/OpenOffice_org/OOo/;
+    $packalias->{$p} = $q;
+  }
+
+  my $last;
+
+  if ($opt_interesting) {
+    $last = [$opt_interesting];
+  } else {
+    $last = \@done;
+  }
+
+  my @longest;
+  my %longest;
+  my $i = 0;
+  for my $p (reverse @$last) {
+    next if exists $longest{$p};
+    my $path = [];
+    while(1) {
+      push @$path, $p;
+      $longest{$p} = 1;
+      last unless @{$pdeps{$p}};
+      my $l;
+      for my $dep (@{$pdeps{$p}}) {
+	if (!$l) {
+	  $l = $dep;
+	  next;
+	}
+	$l = $dep if $finished{$l} < $finished{$dep};
+      }
+      $p = $l;
+    }
+    push @longest, $path;
+    ++$i;
+    last unless $opt_interesting || $i < $numlongest;
+  }
+
+# interesting points in time
+  my %inttimes = ();
+
+  {
+    my %needed = map {$_ => 0} @done;
+    for my $p (@done) {
+      for (@{$pdeps{$p}}) {
+	$needed{$_}++;
+      }
+    }
+
+    for my $p (@{$longest[0]}) {
+      # skip package with short build time that doesn't trigger many
+      # other packages
+      next if !$opt_allinteresting && $buildtime{$p} < 900 && $needed{$p} < 20;
+      $inttimes{$finished{$p}} = (exists $packalias->{$p})?$packalias->{$p}:$p;
+    }
+    if ($verbose) {
+      print "Interesting:\n";
+      for my $t (sort {$a <=> $b} keys %inttimes) {
+	print "$t: $inttimes{$t}\n";
+      }
     }
   }
+
+  taskstart "creating output";
+
+  require RebuildGraph;
+  open(IMG, ">$ddir/rebuild.png") || die("$ddir/rebuild.png: $!\n");
+  print IMG RebuildGraph::render(
+    dist => $dist,
+    width => $opt_width,
+    height => $opt_height,
+    nbuild => \%nbuild,
+    nwait => \%nwait,
+    inttimes => \%inttimes
+  );
+  close IMG;
+
+  sub write_html;
+  write_html($packalias, \@longest);
+}
+
+sub write_html
+{
+  my ($packalias, $longest) = @_;
+
+  no strict;
+
+  open(IN, "<$templdir/disttemplate.html") || die("$templdir/disttemplate.html: $!\n");
+  my $in = '';
+  while (sysread(IN, $in, 4096, length($in)) > 0) {}
   close IN;
-  open(IN, '<', "$ddir/simul") || die "$!";
-  while (<IN>) {
-    chomp;
-    my @a = split(/ /);
-    if ($a[0] eq 'n') {
-      $numpacks = $a[1];
-    } elsif ($a[0] eq 't') {
-      $nbuild{$a[1]} = $a[2];
-      $nwait{$a[1]} = $a[3];
-    } elsif ($a[0] eq 'f') {
-      $finished{$a[1]} = $a[2];
+
+  $in =~ s/\<DIST\>/$dist/sg;
+  $h=hhmm($maxtime);
+  $in =~ s/\<REBUILDTIME\>/$h/sg;
+  $in =~ s/\<NUMPACKS\>/$numpacks/sg;
+
+
+  my $lastfincols = 0;
+  for $lf (@$longest) {
+    $lastfincols = @$lf if $lastfincols < @$lf;
+  }
+  $colspan = $lastfincols * 3 + 1;
+  $ltab = "<table cellpadding=0 cellspacing=0 border=0>\n<tr>\n<td colspan=$colspan width=1 bgcolor=\"#336699\"><img src=void.gif width=1 height=1 border=0></td>\n</tr>\n";
+  for $lf (@$longest) {
+    $ltab .= "<tr>\n";
+    unshift @$lf, '' while @$lf < $lastfincols;
+    for $q (@$lf) {
+      $ltab .= "<td width=1 bgcolor=\"#336699\"><img src=\"void.gif\" width=1 height=18 border=0></td>\n";
+      if ($q ne '') {
+	$qn = (exists $packalias->{$q})?$packalias->{$q}:$q;
+	$ltab .= "<td>&nbsp;$qn:</td>\n";
+	$h=hhmm($buildtime{$q});
+	$hf=hhmm($finished{$q});
+	$ltab .= "<td align=right>&nbsp;$h&nbsp;<br>&nbsp;$hf&nbsp;</td>\n";
+      } else {
+	$ltab .= "<td>&nbsp;</td><td>&nbsp;</td>\n";
+      }
     }
+    $ltab .= "<td width=1 bgcolor=\"#336699\"><img src=\"void.gif\" width=1 height=1 border=0></td>\n";
+    $ltab .= "</tr>\n";
   }
-  @done = sort {$finished{$a} <=> $finished{$b}} keys %finished;
+  $ltab .= "<tr>\n<td colspan=$colspan width=1 bgcolor=\"#336699\"><img src=void.gif width=1 height=1 border=0></td>\n</tr>\n</table>\n";
+  $in =~ s/\<TABLE_LONGEST\>/$ltab/s;
+
+  my @buildtime = sort {$buildtime{$b} <=> $buildtime{$a}} @packs_to_setup;
+  $rtab = "<table cellpadding=0 cellspacing=0 border=0>\n<tr>\n<td colspan=7 width=1 bgcolor=\"#336699\"><img src=void.gif width=1 height=1 border=0></td>\n</tr>\n";
+  $rtab .= "<tr>\n";
+  $rtab .= "<td width=1 bgcolor=\"#336699\"><img src=\"void.gif\" width=1 height=18 border=0></td>\n";
+  $rtab .= "<td align=center bgcolor=\"#336699\">&nbsp;&nbsp;&nbsp;<font color=\"#ffffff\"><i>Package</i></font>&nbsp;&nbsp;&nbsp;</td>\n";
+  $rtab .= "<td width=1 bgcolor=\"#336699\"><img src=\"void.gif\" width=1 height=1 border=0></td>\n";
+  $rtab .= "<td align=center
+  bgcolor=\"#336699\">&nbsp;&nbsp;&nbsp;<font color=\"#ffffff\"><i>build time</i></font>&nbsp;&nbsp;&nbsp;</td>\n";
+  $rtab .= "<td width=1 bgcolor=\"#336699\"><img src=\"void.gif\" width=1 height=1 border=0></td>\n";
+  $rtab .= "</tr>\n";
+  $rtab .= "<tr>\n<td colspan=7 width=1 bgcolor=\"#336699\"><img src=void.gif width=1 height=1 border=0></td>\n</tr>\n";
+  for $pack (splice(@buildtime, 0, 50)) {
+    $rtab .= "<tr>\n";
+    $rtab .= "<td width=1 bgcolor=\"#336699\"><img src=\"void.gif\" width=1 height=18 border=0></td>\n";
+    $rtab .= "<td bgcolor=\"#eeeeee\">&nbsp;$pack&nbsp;</td>\n";
+    $rtab .= "<td width=1 bgcolor=\"#336699\"><img src=\"void.gif\" width=1 height=1 border=0></td>\n";
+    $h = hhmm($buildtime{$pack});
+    $rtab .= "<td align=right>&nbsp;&nbsp;&nbsp;$h&nbsp;&nbsp;&nbsp;</td>\n";
+    $rtab .= "<td width=1 bgcolor=\"#336699\"><img src=\"void.gif\" width=1 height=1 border=0></td>\n";
+    $rtab .= "</tr>\n";
+  }
+  $rtab .= "<tr>\n<td colspan=7 width=1 bgcolor=\"#336699\"><img src=void.gif width=1 height=1 border=0></td>\n</tr>\n</table>\n";
+  $in =~ s/\<TABLE_LONGPACKS\>/$rtab/s;
+
+  my $footer = "<p>Generated at ". ctime(time). "\n";
+  $in =~ s/\<FOOTER\>/$footer/s;
+
+  open(IN, ">$ddir/index.html") || die("$ddir/index.html: $!\n");
+  print IN $in;
   close IN;
-  for (keys %nbuild) {
-    $maxtime = $_ if ($maxtime < $_);
-  }
+
   taskdone;
 }
 
-my $packalias = {};
-$packalias->{$firstcycle} = 'basepacks' if $firstcycle;
-for my $p (@done) {
-  next unless $p =~ /^OpenOffice_org/;
-  my $q = $p;
-  $q =~ s/OpenOffice_org/OOo/;
-  $packalias->{$p} = $q;
-}
+output;
 
-my $last;
-
-if ($opt_interesting) {
-  $last = [$opt_interesting];
-} else {
-  $last = \@done;
-}
-
-my @longest;
-my %longest;
-my $i = 0;
-my $lastfincols = 0;
-for my $p (reverse @$last) {
-  next if exists $longest{$p};
-  my $path = [];
-  while(1) {
-    push @$path, $p;
-    $longest{$p} = 1;
-    last unless @{$pdeps{$p}};
-    my $l;
-    for my $dep (@{$pdeps{$p}}) {
-      if (!$l) {
-	$l = $dep;
-	next;
-      }
-      $l = $dep if $finished{$l} < $finished{$dep};
-    }
-    $p = $l;
-  }
-  push @longest, $path;
-  $lastfincols = @$path if $lastfincols < @$path;
-  ++$i;
-  last unless $opt_interesting || $i < $numlongest;
-}
-
-# interesting points in time
-my %inttimes = ();
-
-{
-  my %needed = map {$_ => 0} @done;
-  for my $p (@done) {
-    for (@{$pdeps{$p}}) {
-      $needed{$_}++;
-    }
-  }
-
-  for my $p (@{$longest[0]}) {
-    # skip package with short build time that doesn't trigger many
-    # other packages
-    next if !$opt_allinteresting && $buildtime{$p} < 900 && $needed{$p} < 20;
-    $inttimes{$finished{$p}} = (exists $packalias->{$p})?$packalias->{$p}:$p;
-  }
-  if ($verbose) {
-    print "Interesting:\n";
-    for my $t (sort {$a <=> $b} keys %inttimes) {
-      print "$t: $inttimes{$t}\n";
-    }
-  }
-}
-
-taskstart "creating output";
-
-require RebuildGraph;
-open(IMG, ">$ddir/rebuild.png") || die("$ddir/rebuild.png: $!\n");
-print IMG RebuildGraph::render(
-  dist => $dist,
-  width => $width,
-  height => $height,
-  nbuild => \%nbuild,
-  nwait => \%nwait,
-  inttimes => \%inttimes
-);
-close IMG;
-
-no strict;
-
-open(IN, "<$templdir/disttemplate.html") || die("$templdir/disttemplate.html: $!\n");
-my $in = '';
-while (sysread(IN, $in, 4096, length($in)) > 0) {}
-close IN;
-
-$in =~ s/\<DIST\>/$dist/sg;
-$h=hhmm($maxtime);
-$in =~ s/\<REBUILDTIME\>/$h/sg;
-$in =~ s/\<NUMPACKS\>/$numpacks/sg;
-
-$colspan = $lastfincols * 3 + 1;
-$ltab = "<table cellpadding=0 cellspacing=0 border=0>\n<tr>\n<td colspan=$colspan width=1 bgcolor=\"#336699\"><img src=void.gif width=1 height=1 border=0></td>\n</tr>\n";
-for $lf (@longest) {
-  $ltab .= "<tr>\n";
-  unshift @$lf, '' while @$lf < $lastfincols;
-  for $q (@$lf) {
-    $ltab .= "<td width=1 bgcolor=\"#336699\"><img src=\"void.gif\" width=1 height=18 border=0></td>\n";
-    if ($q ne '') {
-      $qn = (exists $packalias->{$q})?$packalias->{$q}:$q;
-      $ltab .= "<td>&nbsp;$qn:</td>\n";
-      $h=hhmm($buildtime{$q});
-      $hf=hhmm($finished{$q});
-      $ltab .= "<td align=right>&nbsp;$h&nbsp;<br>&nbsp;$hf&nbsp;</td>\n";
-    } else {
-      $ltab .= "<td>&nbsp;</td><td>&nbsp;</td>\n";
-    }
-  }
-  $ltab .= "<td width=1 bgcolor=\"#336699\"><img src=\"void.gif\" width=1 height=1 border=0></td>\n";
-  $ltab .= "</tr>\n";
-}
-$ltab .= "<tr>\n<td colspan=$colspan width=1 bgcolor=\"#336699\"><img src=void.gif width=1 height=1 border=0></td>\n</tr>\n</table>\n";
-$in =~ s/\<TABLE_LONGEST\>/$ltab/s;
-
-my @buildtime = sort {$buildtime{$b} <=> $buildtime{$a}} @packs_to_setup;
-$rtab = "<table cellpadding=0 cellspacing=0 border=0>\n<tr>\n<td colspan=7 width=1 bgcolor=\"#336699\"><img src=void.gif width=1 height=1 border=0></td>\n</tr>\n";
-$rtab .= "<tr>\n";
-$rtab .= "<td width=1 bgcolor=\"#336699\"><img src=\"void.gif\" width=1 height=18 border=0></td>\n";
-$rtab .= "<td align=center bgcolor=\"#336699\">&nbsp;&nbsp;&nbsp;<font color=\"#ffffff\"><i>Package</i></font>&nbsp;&nbsp;&nbsp;</td>\n";
-$rtab .= "<td width=1 bgcolor=\"#336699\"><img src=\"void.gif\" width=1 height=1 border=0></td>\n";
-$rtab .= "<td align=center
-bgcolor=\"#336699\">&nbsp;&nbsp;&nbsp;<font color=\"#ffffff\"><i>build time</i></font>&nbsp;&nbsp;&nbsp;</td>\n";
-$rtab .= "<td width=1 bgcolor=\"#336699\"><img src=\"void.gif\" width=1 height=1 border=0></td>\n";
-$rtab .= "</tr>\n";
-$rtab .= "<tr>\n<td colspan=7 width=1 bgcolor=\"#336699\"><img src=void.gif width=1 height=1 border=0></td>\n</tr>\n";
-for $pack (splice(@buildtime, 0, 50)) {
-  $rtab .= "<tr>\n";
-  $rtab .= "<td width=1 bgcolor=\"#336699\"><img src=\"void.gif\" width=1 height=18 border=0></td>\n";
-  $rtab .= "<td bgcolor=\"#eeeeee\">&nbsp;$pack&nbsp;</td>\n";
-  $rtab .= "<td width=1 bgcolor=\"#336699\"><img src=\"void.gif\" width=1 height=1 border=0></td>\n";
-  $h = hhmm($buildtime{$pack});
-  $rtab .= "<td align=right>&nbsp;&nbsp;&nbsp;$h&nbsp;&nbsp;&nbsp;</td>\n";
-  $rtab .= "<td width=1 bgcolor=\"#336699\"><img src=\"void.gif\" width=1 height=1 border=0></td>\n";
-  $rtab .= "</tr>\n";
-}
-$rtab .= "<tr>\n<td colspan=7 width=1 bgcolor=\"#336699\"><img src=void.gif width=1 height=1 border=0></td>\n</tr>\n</table>\n";
-$in =~ s/\<TABLE_LONGPACKS\>/$rtab/s;
-
-open(IN, ">$ddir/index.html") || die("$ddir/index.html: $!\n");
-print IN $in;
-close IN;
-
-taskdone;
