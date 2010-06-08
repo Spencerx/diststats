@@ -28,6 +28,7 @@ my $maxiter = 0;
 my $ddir;
 my $srcdir;
 my $opt_timing;
+my $outfmt = 'html';
 
 my $numlongest = 10;
 
@@ -44,7 +45,10 @@ GetOptions (
     'timing' => \$opt_timing,
     'width=i' => \$opt_width,
     'height=i' => \$opt_height,
+    'outfmt=s' => \$outfmt,
 ) or exit(1);
+
+die "invalid output format\n" unless ($outfmt eq 'html' || $outfmt eq 'plain');
 
 my %subpacks;
 my @packs_to_setup;
@@ -592,7 +596,25 @@ sub output
   close IMG;
 
   sub write_html;
-  write_html($packalias, \@longest);
+  write_html($packalias, \@longest) if $outfmt eq 'html';
+  sub write_plain;
+  write_plain($packalias, \@longest) if $outfmt eq 'plain';
+}
+
+sub write_plain
+{
+  my ($packalias, $longest) = @_;
+  open(OUT, '>', "$ddir/longest");
+  print OUT "T $maxtime\n";
+  my %seen;
+  for my $lf (@$longest) {
+    grep { $seen{$_} = 1; $_ = $packalias->{$_} if exists $packalias->{$_}; } @$lf;
+    print OUT "l ", join(' ', @$lf), "\n";
+  }
+  for my $p (keys %seen) {
+    printf OUT "t %s %d %d\n", ($packalias->{$p}||$p), $buildtime{$p}, $finished{$p};
+  }
+  close OUT;
 }
 
 sub write_html
