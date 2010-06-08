@@ -599,35 +599,33 @@ sub write_html
 {
   my ($packalias, $longest) = @_;
 
-  no strict;
-
   open(IN, "<$templdir/disttemplate.html") || die("$templdir/disttemplate.html: $!\n");
   my $in = '';
   while (sysread(IN, $in, 4096, length($in)) > 0) {}
   close IN;
 
   $in =~ s/\<DIST\>/$dist/sg;
-  $h=hhmm($maxtime);
+  my $h=hhmm($maxtime);
   $in =~ s/\<REBUILDTIME\>/$h/sg;
   $in =~ s/\<NUMPACKS\>/$numpacks/sg;
 
 
   my $lastfincols = 0;
-  for $lf (@$longest) {
+  for my $lf (@$longest) {
     $lastfincols = @$lf if $lastfincols < @$lf;
   }
-  $colspan = $lastfincols * 3 + 1;
-  $ltab = "<table cellpadding=0 cellspacing=0 border=0>\n<tr>\n<td colspan=$colspan width=1 bgcolor=\"#336699\"><img src=void.gif width=1 height=1 border=0></td>\n</tr>\n";
-  for $lf (@$longest) {
+  my $colspan = $lastfincols * 3 + 1;
+  my $ltab = "<table cellpadding=0 cellspacing=0 border=0>\n<tr>\n<td colspan=$colspan width=1 bgcolor=\"#336699\"><img src=void.gif width=1 height=1 border=0></td>\n</tr>\n";
+  for my $lf (@$longest) {
     $ltab .= "<tr>\n";
     unshift @$lf, '' while @$lf < $lastfincols;
-    for $q (@$lf) {
+    for my $q (@$lf) {
       $ltab .= "<td width=1 bgcolor=\"#336699\"><img src=\"void.gif\" width=1 height=18 border=0></td>\n";
       if ($q ne '') {
-	$qn = (exists $packalias->{$q})?$packalias->{$q}:$q;
+	my $qn = (exists $packalias->{$q})?$packalias->{$q}:$q;
 	$ltab .= "<td>&nbsp;$qn:</td>\n";
 	$h=hhmm($buildtime{$q});
-	$hf=hhmm($finished{$q});
+	my $hf=hhmm($finished{$q});
 	$ltab .= "<td align=right>&nbsp;$h&nbsp;<br>&nbsp;$hf&nbsp;</td>\n";
       } else {
 	$ltab .= "<td>&nbsp;</td><td>&nbsp;</td>\n";
@@ -640,7 +638,7 @@ sub write_html
   $in =~ s/\<TABLE_LONGEST\>/$ltab/s;
 
   my @buildtime = sort {$buildtime{$b} <=> $buildtime{$a}} @packs_to_setup;
-  $rtab = "<table cellpadding=0 cellspacing=0 border=0>\n<tr>\n<td colspan=7 width=1 bgcolor=\"#336699\"><img src=void.gif width=1 height=1 border=0></td>\n</tr>\n";
+  my $rtab = "<table cellpadding=0 cellspacing=0 border=0>\n<tr>\n<td colspan=7 width=1 bgcolor=\"#336699\"><img src=void.gif width=1 height=1 border=0></td>\n</tr>\n";
   $rtab .= "<tr>\n";
   $rtab .= "<td width=1 bgcolor=\"#336699\"><img src=\"void.gif\" width=1 height=18 border=0></td>\n";
   $rtab .= "<td align=center bgcolor=\"#336699\">&nbsp;&nbsp;&nbsp;<font color=\"#ffffff\"><i>Package</i></font>&nbsp;&nbsp;&nbsp;</td>\n";
