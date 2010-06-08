@@ -19,6 +19,7 @@ my $default_build_time = 3333;
 my $opt_justgraph;
 my $opt_interesting;
 my $opt_allinteresting;
+my $debug;
 my $verbose;
 my $maxiter = 0;
 
@@ -31,8 +32,8 @@ GetOptions (
     'allinteresting' => \$opt_allinteresting,
     'verbose' => \$verbose,
     'maxiter' => \$maxiter,
+    'debug' => \$debug,
 ) or exit(1);
-
 
 my %subpacks;
 my @packs_to_setup;
@@ -58,6 +59,17 @@ sub hhmm {
   my $t = shift;
   $t /= 60;
   return sprintf("%02d:%02d", int($t / 60), $t % 60);
+}
+
+my $starttime;
+sub taskstart {
+  print $_[0], " ...\n";
+  $starttime = time;
+}
+
+sub taskdone {
+  my $t = time-$starttime;
+  print "done in $t secs\n";
 }
 
 my $dist = shift @ARGV;
@@ -126,12 +138,9 @@ if (! -e $fn) {
 	print "retreiving builddepinfo\n";
 	system("osc api '/build/$dist/_builddepinfo' > $fn");
 }
-print "parsing build deps ...\n";
-my $now = time;
+taskstart "parsing build deps";
 $pdep->parsefile($fn, ProtocolEncoding => 'UTF-8');
-
-$now = time-$now;
-print "done in $now secs\n";
+taskdone;
 
 
 #goto nixda;
@@ -174,12 +183,9 @@ if (! -e $fn) {
 	system("osc api '/build/$dist/_jobhistory?code=lastfailures' > $fn");
 }
 my $p1 = new XML::Parser( Handlers => {Start => \&handle_start});
-print "parsing jobhistory...\n";
-$now = time;
+taskstart "parsing jobhistory";
 $p1->parsefile($fn, ProtocolEncoding => 'UTF-8');
-
-$now = time-$now;
-print "done in $now secs\n";
+taskdone;
 
 for $pack (@packs_to_setup) {
   if (!$packmin{$pack}) {
@@ -198,17 +204,8 @@ for $pack (@packs_to_setup) {
   }
 }
 
-$now = time-$now;
-print "done in $now secs\n";
 
-#######################################################################
-#######################################################################
-###
-###  Sort specfiles
-###
-
-$now = time;
-print "calculating dependencies...\n";
+taskstart "calculating dependencies";
 # map dependencies to real packages, ignore - deps, filter out self
 for $pack (@packs_to_setup) {
   #$pdeps{$pack} = [ unify(grep {$_ ne $pack} map {$subpack2pack{$_} || ()} grep {!/^-/} @{$deps{$pack} || []}) ];
@@ -219,62 +216,59 @@ for $pack (@packs_to_setup) {
       # could be versioned dep. throw away the version
       $dep =~ s/ .*//;
       if (!exists $subpack2pack{$dep}) {
-	print "$pack: broken dep $dep\n";
+	print STDERR "$pack: broken dep $dep\n";
 	next;
       }
     }
     $dep = $subpack2pack{$dep};
     if ($pack eq $dep) {
-      print "$pack: self req\n";
+      print "$pack: self req\n" if $verbose;
       next;
     }
     push @dl, $dep;
   }
   $pdeps{$pack} = [ unify @dl ];
 }
+taskdone;
 
 @todo = @packs_to_setup;
 
 %done = ();
 @done = ();
 
-$now = time-$now;
-print "done in $now secs\n";
-
-open(FOO, '>', "$ddir/dep1");
-print FOO Data::Dumper->Dump(
+if ($debug) {
+  open(FOO, '>', "$ddir/dep1");
+  print FOO Data::Dumper->Dump(
     [\%pdeps],
     [qw/*pdeps/]);
-close FOO;
+  close FOO;
 
-open(FOO, '>', "$ddir/dep2");
-print FOO Data::Dumper->Dump(
+  open(FOO, '>', "$ddir/dep2");
+  print FOO Data::Dumper->Dump(
     [\%deps],
     [qw/*deps/]);
-close FOO;
+  close FOO;
 
-open(FOO, '>', "$ddir/dep3");
-print FOO Data::Dumper->Dump(
+  open(FOO, '>', "$ddir/dep3");
+  print FOO Data::Dumper->Dump(
     [\%subpack2pack],
     [qw/*subpack2pack/]);
-close FOO;
+  close FOO;
+}
 
 my $numpacks = @todo;
 
-print "computing dependency graph ...\n";
-$now = time;
+taskstart "computing dependency graph";
 
 use Dfs;
 my $dfs = new Dfs(\%pdeps);
 $dfs->startrdfs(@todo);
 
-$now = time-$now;
-print "done in $now secs\n";
+taskdone;
 
 ### cycle elimination
 #
-print "finding cycles ...\n";
-$now = time;
+taskstart "finding cycles";
 my %cycles = $dfs->findcycles();
 # put all packages involved in a cycle in the hash,
 # calculate cycle build time
@@ -317,14 +311,15 @@ for my $p (keys %cycledeps) {
   @{$pdeps{$p}} = grep {!exists $cycles{$_}} unify(@{$cycledeps{$p}});
 }
 
-$now = time-$now;
-print "done in $now secs\n";
+taskdone;
 
-open(FOO, '>', "$ddir/dep4");
-print FOO Data::Dumper->Dump(
+if ($debug) {
+  open(FOO, '>', "$ddir/dep4");
+  print FOO Data::Dumper->Dump(
     [\%pdeps],
     [qw/*pdeps/]);
-close FOO;
+  close FOO;
+}
 
 my $firstcycle;
 if (exists $cycles{'autoconf'}) {
@@ -394,7 +389,6 @@ my %nbuild = ();
 my %nwait = ();
 my $maxnbuild = 0;
 
-$now = time;
 my $cnt = 0;
 
 my $nwait = @todo;
@@ -403,7 +397,8 @@ for my $p (splice @todo) {
 	push @todo, $p;
     }
 }
-print "number of packages $nwait\n";
+
+taskstart "Starting simulation with $nwait packages";
 
 my %building;
 my %finished;
@@ -468,9 +463,7 @@ $nbuild{$ti} = 0;
 $nwait{$ti}  = 0;
 close LASTFIN;
 
-#print Dumper(\%nbuild, $ti);
-$now = time-$now;
-print "simulation done after $now secs\n";
+taskdone;
 
 open(FOO, '>', "$ddir/simul");
 print FOO Data::Dumper->Dump(
@@ -547,9 +540,11 @@ for my $p (keys %longest) {
   next if !$opt_allinteresting && $packmin{$p} < 900 && $needed{$p} < 20;
   $inttimes{$finished{$p}} = (exists $packalias->{$p})?$packalias->{$p}:$p;
 }
-print "Interesting:\n";
-for my $t (sort {$a <=> $b} keys %inttimes) {
-  print "$t: $inttimes{$t}\n";
+if ($verbose) {
+  print "Interesting:\n";
+  for my $t (sort {$a <=> $b} keys %inttimes) {
+    print "$t: $inttimes{$t}\n";
+  }
 }
 
 no strict;
