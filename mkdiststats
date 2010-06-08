@@ -366,9 +366,10 @@ my $ti = 0;
 my $nbuild = 0;
 
 open(FOO, '>', "$ddir/deps");
-print FOO Data::Dumper->Dump(
-    [$firstcycle, \%pdeps, \%buildtime],
-    [qw/firstcycle  *pdeps   *buildtime/]);
+print FOO "f $firstcycle\n";
+while (my ($p, $d) = each %pdeps) {
+  print FOO "b $p ", $buildtime{$p}, ' ', join(' ', @$d), "\n";
+}
 close FOO;
 
 #%deppath = ();
@@ -451,23 +452,48 @@ $maxtime = $ti;
 
 taskdone;
 
-open(FOO, '>', "$ddir/simul");
-print FOO Data::Dumper->Dump(
-    [$numpacks, \%nbuild, \%nwait, \%finished, \@done],
-    [qw/numpacks *nbuild   *nwait   *finished   *done/]);
-close FOO;
+open(OUT, '>', "$ddir/simul");
+print OUT "n $numpacks\n";
+while (my ($ti, $nb) = each %nbuild) {
+  printf OUT "t %d %d %d\n", $ti, $nb, $nwait{$ti};
+}
+while (my ($p, $ti) = each %finished) {
+  printf OUT "f %s %d\n", $p, $ti;
+}
+close OUT;
 
 #print Dumper(\@longest);
 
 drawgraph:
 if ($opt_justgraph) {
   taskstart "reading deps";
-  open(FOO, '<', "$ddir/deps") || die "$!";
-  eval join('', <FOO>);
-  close FOO;
-  open(FOO, '<', "$ddir/simul") || die "$!";
-  eval join('', <FOO>);
-  close FOO;
+  open(IN, '<', "$ddir/deps") || die "$!";
+  while (<IN>) {
+    chomp;
+    my @a = split(/ /);
+    if ($a[0] eq 'f') {
+      $firstcycle = $a[1];
+    } elsif ($a[0] eq 'b') {
+      $buildtime{$a[1]} = $a[2];
+      $pdeps{$a[1]} = [@a[3 .. $#a]];
+    }
+  }
+  close IN;
+  open(IN, '<', "$ddir/simul") || die "$!";
+  while (<IN>) {
+    chomp;
+    my @a = split(/ /);
+    if ($a[0] eq 'n') {
+      $numpacks = $a[1];
+    } elsif ($a[0] eq 't') {
+      $nbuild{$a[1]} = $a[2];
+      $nwait{$a[1]} = $a[3];
+    } elsif ($a[0] eq 'f') {
+      $finished{$a[1]} = $a[2];
+    }
+  }
+  @done = sort {$finished{$a} <=> $finished{$b}} keys %finished;
+  close IN;
   for (keys %nbuild) {
     $maxtime = $_ if ($maxtime < $_);
   }
