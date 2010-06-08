@@ -539,7 +539,7 @@ for my $p (reverse @$last) {
 }
 
 my %inttimes = ();
-for my $p (keys %longest) {
+for my $p (@{$longest[0]}) {
   # skip package with short build time that doesn't trigger many
   # other packages
   next if !$opt_allinteresting && $buildtime{$p} < 900 && $needed{$p} < 20;
