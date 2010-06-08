@@ -50,9 +50,6 @@ my %failed;
 my %buildtime;
 my %pdeps;
 my @todo;
-my %known;
-my %done;
-my %needed;
 my @basesubpacks;
 my @done;
 my $maxtime = 0;
@@ -243,9 +240,6 @@ taskdone;
 
 @todo = @packs_to_setup;
 
-%done = ();
-@done = ();
-
 if ($debug) {
   open(FOO, '>', "$ddir/dep1");
   print FOO Data::Dumper->Dump(
@@ -361,28 +355,12 @@ if (exists $cycles{'autoconf'}) {
   } @todo;
 }
 
-%known = map {$_ => 1} @todo;
-%needed = map {$_ => 0} @todo;
-for my $p (@todo) {
-  next unless $pdeps{$p};
-  for (@{$pdeps{$p}}) {
-    if ($known{$_}) {
-      $needed{$_}++;
-    } else {
-      $done{$_} = 1;
-    }
-  }
-}
-
 # walk the now cycle free graph again
 $dfs = new Dfs(\%pdeps);
 $dfs->startrdfs(@todo);
 #print Dumper(\@todo);
 #print Dumper($dfs->{'reversedgraph'});
 #print Dumper($dfs->{'reverseorder'});
-
-%done = ();
-@done = ();
 
 my $ti = 0;
 my $nbuild = 0;
@@ -475,8 +453,8 @@ taskdone;
 
 open(FOO, '>', "$ddir/simul");
 print FOO Data::Dumper->Dump(
-    [$numpacks, \%nbuild, \%nwait, \%needed, \%finished, \@done],
-    [qw/numpacks *nbuild   *nwait   *needed   *finished   *done/]);
+    [$numpacks, \%nbuild, \%nwait, \%finished, \@done],
+    [qw/numpacks *nbuild   *nwait   *finished   *done/]);
 close FOO;
 
 #print Dumper(\@longest);
@@ -538,17 +516,28 @@ for my $p (reverse @$last) {
   last unless $opt_interesting || $i < $numlongest;
 }
 
+# intersting points in time
 my %inttimes = ();
-for my $p (@{$longest[0]}) {
-  # skip package with short build time that doesn't trigger many
-  # other packages
-  next if !$opt_allinteresting && $buildtime{$p} < 900 && $needed{$p} < 20;
-  $inttimes{$finished{$p}} = (exists $packalias->{$p})?$packalias->{$p}:$p;
-}
-if ($verbose) {
-  print "Interesting:\n";
-  for my $t (sort {$a <=> $b} keys %inttimes) {
-    print "$t: $inttimes{$t}\n";
+
+{
+  my %needed = map {$_ => 0} @done;
+  for my $p (@done) {
+    for (@{$pdeps{$p}}) {
+      $needed{$_}++;
+    }
+  }
+
+  for my $p (@{$longest[0]}) {
+    # skip package with short build time that doesn't trigger many
+    # other packages
+    next if !$opt_allinteresting && $buildtime{$p} < 900 && $needed{$p} < 20;
+    $inttimes{$finished{$p}} = (exists $packalias->{$p})?$packalias->{$p}:$p;
+  }
+  if ($verbose) {
+    print "Interesting:\n";
+    for my $t (sort {$a <=> $b} keys %inttimes) {
+      print "$t: $inttimes{$t}\n";
+    }
   }
 }
 
