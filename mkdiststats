@@ -81,14 +81,10 @@ $ddir =~ s,/,::,g;
 mkdir "output", 0755;
 $ddir = "output/$ddir";
 
-my $lastfinfn = "$ddir/lastfin";
-
 mkdir $ddir, 0755 unless -d $ddir;
 die unless -d $ddir;
 
 goto drawgraph if $opt_justgraph;
-
-open(LASTFIN, '>', $lastfinfn);
 
 my $pack = undef;
 my $text = '';
@@ -461,7 +457,6 @@ while ($nwait || $nbuild)
 }
 $nbuild{$ti} = 0;
 $nwait{$ti}  = 0;
-close LASTFIN;
 
 taskdone;
 
