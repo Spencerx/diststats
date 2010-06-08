@@ -227,7 +227,7 @@ for $pack (@packs_to_setup) {
       # could be versioned dep. throw away the version
       $dep =~ s/ .*//;
       if (!exists $subpack2pack{$dep}) {
-	print STDERR "$pack: broken dep $dep\n";
+	print "$pack: broken dep $dep\n" if $verbose;
 	next;
       }
     }
@@ -370,7 +370,7 @@ my $ti = 0;
 my $nbuild = 0;
 
 open(FOO, '>', "$ddir/deps");
-print FOO "f $firstcycle\n";
+print FOO "f $firstcycle\n" if $firstcycle;
 while (my ($p, $d) = each %pdeps) {
   print FOO "b $p ", $buildtime{$p}, ' ', join(' ', @$d), "\n";
 }
