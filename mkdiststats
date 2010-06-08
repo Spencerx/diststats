@@ -115,12 +115,9 @@ sub handle_end_builddep($)
   my ($e, $name) = @_;
   if ($name eq 'pkgdep') {
     push(@{$deps{$pack}}, $text);
-    return;
-  }
-  if ($name eq 'subpkg') {
+  } elsif ($name eq 'subpkg') {
     push(@{$subpacks{$pack}}, $text);
     $subpack2pack{$text} = $pack;
-    return;
   }
   $text = '';
 }
@@ -161,6 +158,9 @@ sub handle_start($)
   my $readytime = $attrs{"readytime"};
   my $starttime = $attrs{"starttime"};
   my $endtime = $attrs{"endtime"};
+
+  return unless $package;
+  return unless exists $deps{$package};
 
   my $t = $endtime - $starttime;
   my $ti = $starttime - $readytime;
