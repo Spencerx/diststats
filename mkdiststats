@@ -30,6 +30,7 @@ my $srcdir;
 my $opt_timing;
 my $outfmt = 'html';
 my $opt_nopackalias;
+my $opt_graph_start;
 
 my $numlongest = 10;
 
@@ -48,9 +49,18 @@ GetOptions (
     'height=i' => \$opt_height,
     'outfmt=s' => \$outfmt,
     'nopackalias' => \$opt_nopackalias,
+    'graph-start=s' => \$opt_graph_start,
 ) or exit(1);
 
 die "invalid output format\n" unless ($outfmt eq 'html' || $outfmt eq 'plain');
+
+if ($opt_graph_start) {
+  if($opt_graph_start =~ /(\d{1,2}):(\d{2})/) {
+    $opt_graph_start = ($1*60+$2)*60;
+  } elsif ($opt_graph_start !~ /^\d+$/) {
+    die "--graph-start must be numeric\n";
+  }
+}
 
 my %subpacks;
 my @packs_to_setup;
@@ -577,6 +587,7 @@ sub output
       next if !$opt_allinteresting && $buildtime{$p} < 900 && $needed{$p} < 20;
       $inttimes{$finished{$p}} = (exists $packalias->{$p})?$packalias->{$p}:$p;
     }
+    $inttimes{$finished{$opt_interesting}} = $opt_interesting if $opt_interesting;
     if ($verbose) {
       print "Interesting:\n";
       for my $t (sort {$a <=> $b} keys %inttimes) {
@@ -595,7 +606,9 @@ sub output
     height => $opt_height,
     nbuild => \%nbuild,
     nwait => \%nwait,
-    inttimes => \%inttimes
+    inttimes => \%inttimes,
+    starttime => ($opt_graph_start?$opt_graph_start:0),
+    endtime => ($opt_interesting?$finished{$opt_interesting}:0),
   );
   close IMG;
 

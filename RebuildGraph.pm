@@ -20,10 +20,14 @@ sub render {
   my $nbuild = $params{'nbuild'} || {};
   my $nwait = $params{'nwait'} || {};
   my $inttimes = $params{'inttimes'} || {};
+  my $starttime = $params{'starttime'} || 0;
+  my $endtime = $params{'endtime'} || 0;
 
   my $maxnbuild = 0;
   my $maxtime = 0;
-  for (keys %$nbuild) {
+  for (sort {$a <=> $b} keys %$nbuild) {
+    next if ($_ < $starttime);
+    last if ($endtime && $_ > $endtime);
     $maxnbuild = $nbuild->{$_} if ($maxnbuild < $nbuild->{$_});
     $maxtime = $_ if ($maxtime < $_);
   }
@@ -33,7 +37,7 @@ sub render {
   my $yaxisround;
   $yaxisround = $nn > 200 ? 100 : 10;
 
-  my $xaxisend = int(($maxtime + 3600 - 1) / 3600) * 3600;
+  my $xaxisend = int(($maxtime-$starttime + 3600 - 1) / 3600) * 3600;
   my $yaxisend = int(($nn + $yaxisround - 1) / $yaxisround) * $yaxisround;
   my $xaxisstep = int($xaxisend / 12);
   $xaxisstep = int(($xaxisstep + 3600 - 1) / 3600) * 3600;
@@ -67,7 +71,9 @@ sub render {
 
   my ($ox, $oy1, $oy2) = 0;
   for my $t (sort {$a <=> $b} keys %$nbuild) {
-    my $x = $ixoff + int($iw / $xaxisend * $t);
+    next if ($t < $starttime);
+    last if ($endtime && $t > $endtime);
+    my $x = $ixoff + int($iw / $xaxisend * ($t - $starttime));
     my $y1 = $iyoff + $ih - 1 - int($ih / $yaxisend * ($nbuild->{$t} + $nwait->{$t}));
     my $y2 = $iyoff + $ih - 1 - int($ih / $yaxisend * ($nbuild->{$t}));
     $y1 = $iyoff if $y1 < $iyoff;
@@ -96,7 +102,7 @@ sub render {
     $image->line($x, $iyoff + $ih - 3, $x, $iyoff +$ih, $sub ? $gray : $grayd);
     $image->line($x, $iyoff - 1, $x, $iyoff + 2, $sub ? $gray : $grayd);
     if ($sub == 0) {
-      my $str = hhmm($xax);
+      my $str = hhmm($xax+$starttime);
       my $strw = $SmallFontWidth * length($str);
       $image->string(gdSmallFont, $x - $strw/2, $iyoff +$ih + 5, $str, $black);
     }
@@ -130,7 +136,9 @@ sub render {
   my $TinyFontHeight = gdTinyFont->height;
   my $yy = 0;
   for my $t (sort {$a <=> $b} keys %$inttimes) {
-    my $x = $ixoff + int($iw / $xaxisend * $t);
+    next if ($t < $starttime);
+    last if ($endtime && $t > $endtime);
+    my $x = $ixoff + int($iw / $xaxisend * ($t - $starttime));
     my $y = $iyoff + $ih + 20 + $SmallFontHeight + $yy * $TinyFontHeight;
     $image->line($x, $iyoff + $ih - 1, $x, $y, $gray);
     my $str = $inttimes->{$t};
