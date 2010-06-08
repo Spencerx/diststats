@@ -44,8 +44,7 @@ my @packs_to_setup;
 my %deps;
 my %subpack2pack;
 my %failed;
-my %packmin_m;
-my %packmin;
+my %buildtime;
 my %pdeps;
 my @todo;
 my %known;
@@ -173,11 +172,8 @@ sub handle_start($)
     }
     return;
   }
-  if (!exists $packmin_m{$package} || $packmin_m{$package}->[0] > $t) {
-    $packmin_m{$package} = [$t, $ti, $tb];
-  }
-  return unless !$packmin{$package} || $packmin{$package} > $t;
-  $packmin{$package} = $t;
+  return unless !$buildtime{$package} || $buildtime{$package} > $t;
+  $buildtime{$package} = $t;
 }
 
 $fn = "$ddir/_jobhistory.xml";
@@ -194,18 +190,18 @@ $p1->parsefile($fn, ProtocolEncoding => 'UTF-8');
 taskdone;
 
 for $pack (@packs_to_setup) {
-  if (!$packmin{$pack}) {
+  if (!$buildtime{$pack}) {
     if ($failed{$pack}) {
-	$packmin{$pack} = $failed{$pack};
-	if ($packmin{$pack} < $default_build_time) {
+	$buildtime{$pack} = $failed{$pack};
+	if ($buildtime{$pack} < $default_build_time) {
 	    print "$pack failed quickly, using default time\n";
-	    $packmin{$pack} = $default_build_time;
+	    $buildtime{$pack} = $default_build_time;
 	} else {
 	    print "$pack failed, using default time\n";
 	}
     } else {
 	print "$pack never built, using default time\n";
-	$packmin{$pack} = $default_build_time;
+	$buildtime{$pack} = $default_build_time;
     }
   }
 }
@@ -286,11 +282,11 @@ for my $c (keys %cycles) {
     $cycles{$p} = $cn;
     # find longest time
     # FIXME: add all times
-    $eti = $packmin{$p} if $eti < $packmin{$p};
+    $eti = $buildtime{$p} if $eti < $buildtime{$p};
   }
   # twice the time of the longest package
   $eti *= 2;
-  $packmin{$cn} = $eti;
+  $buildtime{$cn} = $eti;
 }
 
 my %cycledeps; # collects deps of the packages of a cycle 
@@ -333,9 +329,9 @@ if (exists $cycles{'autoconf'}) {
   if ($verbose) {
     print "Basepacks timings:\n";
     for $pack (split(',', $cycles{'autoconf'})) {
-      print "$pack: $packmin{$pack}\n";
+      print "$pack: $buildtime{$pack}\n";
     }
-    print "Total: ", hhmm($packmin{$cycles{'autoconf'}}),"\n";
+    print "Total: ", hhmm($buildtime{$cycles{'autoconf'}}),"\n";
     print "first cycle: $firstcycle\n";
   }
 }
@@ -385,8 +381,8 @@ my $nbuild = 0;
 
 open(FOO, '>', "$ddir/deps");
 print FOO Data::Dumper->Dump(
-    [$firstcycle, \%pdeps, \%packmin],
-    [qw/firstcycle  *pdeps   *packmin/]);
+    [$firstcycle, \%pdeps, \%buildtime],
+    [qw/firstcycle  *pdeps   *buildtime/]);
 close FOO;
 
 #%deppath = ();
@@ -438,7 +434,7 @@ while ($nwait || $nbuild)
   my $i = 0;
   for my $p (splice @todo) {
     my $eti = 0;
-    $eti = $packmin{$p};
+    $eti = $buildtime{$p};
     $eti += $ti;
     print "$ti: starting $p, will finish at $eti\n" if $verbose;
     $building{$eti} = [] unless exists $building{$eti};
@@ -472,8 +468,8 @@ taskdone;
 
 open(FOO, '>', "$ddir/simul");
 print FOO Data::Dumper->Dump(
-    [$numpacks, \%nbuild, \%nwait, \%needed, \%packmin_m, \%finished, \@done],
-    [qw/numpacks *nbuild   *nwait   *needed   *packmin_m   *finished   *done/]);
+    [$numpacks, \%nbuild, \%nwait, \%needed, \%finished, \@done],
+    [qw/numpacks *nbuild   *nwait   *needed   *finished   *done/]);
 close FOO;
 
 #print Dumper(\@longest);
@@ -542,7 +538,7 @@ my %inttimes = ();
 for my $p (keys %longest) {
   # skip package with short build time that doesn't trigger many
   # other packages
-  next if !$opt_allinteresting && $packmin{$p} < 900 && $needed{$p} < 20;
+  next if !$opt_allinteresting && $buildtime{$p} < 900 && $needed{$p} < 20;
   $inttimes{$finished{$p}} = (exists $packalias->{$p})?$packalias->{$p}:$p;
 }
 if ($verbose) {
@@ -702,7 +698,7 @@ for $lf (@longest) {
     if ($q ne '') {
       $qn = (exists $packalias->{$q})?$packalias->{$q}:$q;
       $ltab .= "<td>&nbsp;$qn:</td>\n";
-      $h=hhmm($packmin{$q});
+      $h=hhmm($buildtime{$q});
       $hf=hhmm($finished{$q});
       $ltab .= "<td align=right>&nbsp;$h&nbsp;<br>&nbsp;$hf&nbsp;</td>\n";
     } else {
@@ -715,28 +711,24 @@ for $lf (@longest) {
 $ltab .= "<tr>\n<td colspan=$colspan width=1 bgcolor=\"#336699\"><img src=void.gif width=1 height=1 border=0></td>\n</tr>\n</table>\n";
 $in =~ s/\<TABLE_LONGEST\>/$ltab/s;
 
-print "making packmin table\n";
-@packmin_m = sort {$packmin_m{$b}->[0] <=> $packmin_m{$a}->[0]} keys %packmin_m;
+print "making buildtime table\n";
+my @buildtime = sort {$buildtime{$b} <=> $buildtime{$a}} @packs_to_setup;
 $rtab = "<table cellpadding=0 cellspacing=0 border=0>\n<tr>\n<td colspan=7 width=1 bgcolor=\"#336699\"><img src=void.gif width=1 height=1 border=0></td>\n</tr>\n";
 $rtab .= "<tr>\n";
 $rtab .= "<td width=1 bgcolor=\"#336699\"><img src=\"void.gif\" width=1 height=18 border=0></td>\n";
 $rtab .= "<td align=center bgcolor=\"#336699\">&nbsp;&nbsp;&nbsp;<font color=\"#ffffff\"><i>Package</i></font>&nbsp;&nbsp;&nbsp;</td>\n";
 $rtab .= "<td width=1 bgcolor=\"#336699\"><img src=\"void.gif\" width=1 height=1 border=0></td>\n";
-$rtab .= "<td align=center bgcolor=\"#336699\">&nbsp;&nbsp;&nbsp;<font color=\"#ffffff\"><i>init_buildsystem</i></font>&nbsp;&nbsp;&nbsp;</td>\n";
-$rtab .= "<td width=1 bgcolor=\"#336699\"><img src=\"void.gif\" width=1 height=1 border=0></td>\n";
-$rtab .= "<td align=center bgcolor=\"#336699\">&nbsp;&nbsp;&nbsp;<font color=\"#ffffff\"><i>build</i></font>&nbsp;&nbsp;&nbsp;</td>\n";
+$rtab .= "<td align=center
+bgcolor=\"#336699\">&nbsp;&nbsp;&nbsp;<font color=\"#ffffff\"><i>build time</i></font>&nbsp;&nbsp;&nbsp;</td>\n";
 $rtab .= "<td width=1 bgcolor=\"#336699\"><img src=\"void.gif\" width=1 height=1 border=0></td>\n";
 $rtab .= "</tr>\n";
 $rtab .= "<tr>\n<td colspan=7 width=1 bgcolor=\"#336699\"><img src=void.gif width=1 height=1 border=0></td>\n</tr>\n";
-for $pack (splice(@packmin_m, 0, 50)) {
+for $pack (splice(@buildtime, 0, 50)) {
   $rtab .= "<tr>\n";
   $rtab .= "<td width=1 bgcolor=\"#336699\"><img src=\"void.gif\" width=1 height=18 border=0></td>\n";
   $rtab .= "<td bgcolor=\"#eeeeee\">&nbsp;$pack&nbsp;</td>\n";
   $rtab .= "<td width=1 bgcolor=\"#336699\"><img src=\"void.gif\" width=1 height=1 border=0></td>\n";
-  $h = hhmm($packmin_m{$pack}->[1]);
-  $rtab .= "<td align=right>&nbsp;&nbsp;&nbsp;$h&nbsp;&nbsp;&nbsp;</td>\n";
-  $rtab .= "<td width=1 bgcolor=\"#336699\"><img src=\"void.gif\" width=1 height=1 border=0></td>\n";
-  $h = hhmm($packmin_m{$pack}->[2]);
+  $h = hhmm($buildtime{$pack});
   $rtab .= "<td align=right>&nbsp;&nbsp;&nbsp;$h&nbsp;&nbsp;&nbsp;</td>\n";
   $rtab .= "<td width=1 bgcolor=\"#336699\"><img src=\"void.gif\" width=1 height=1 border=0></td>\n";
   $rtab .= "</tr>\n";
