@@ -25,6 +25,8 @@ my $opt_allinteresting;
 my $debug;
 my $verbose;
 my $maxiter = 0;
+my $ddir;
+my $srcdir;
 
 my $numlongest = 10;
 
@@ -36,6 +38,8 @@ GetOptions (
     'verbose' => \$verbose,
     'maxiter' => \$maxiter,
     'debug' => \$debug,
+    'destdir=s' => \$ddir,
+    'srcdir=s' => \$srcdir,
 ) or exit(1);
 
 my %subpacks;
@@ -79,13 +83,15 @@ my $dist = shift @ARGV;
 die("No dist specified!\n") unless $dist ne '';
 
 my $templdir = ".";
-my $ddir = $dist;
-$ddir =~ s,/,::,g;
-mkdir "output", 0755;
-$ddir = "output/$ddir";
+if (!$ddir) {
+  $ddir = $dist;
+  $ddir =~ s,/,_,g;
+  mkdir "output", 0755;
+  $ddir = "output/$ddir";
+  mkdir $ddir, 0755 unless -d $ddir;
+}
 
-mkdir $ddir, 0755 unless -d $ddir;
-die unless -d $ddir;
+die "$ddir must be a directory\n" unless -d $ddir;
 
 goto drawgraph if $opt_justgraph;
 
@@ -133,13 +139,14 @@ my $pdep = new XML::Parser(
     Char => \&handle_ch_builddep
   });
 
-my $fn = "$ddir/_builddepinfo.xml";
-if (! -e $fn) {
+my $file = ($srcdir?$srcdir:$ddir)."/_builddepinfo.xml";
+if (! -e $file) {
+  die "_builddepinfo.xml not found" if $srcdir;
   print "retreiving builddepinfo\n";
-  system("osc api '/build/$dist/_builddepinfo' > $fn");
+  system("osc api '/build/$dist/_builddepinfo' > $file");
 }
 taskstart "parsing build deps";
-$pdep->parsefile($fn, ProtocolEncoding => 'UTF-8');
+$pdep->parsefile($file, ProtocolEncoding => 'UTF-8');
 taskdone;
 
 
@@ -176,17 +183,18 @@ sub handle_start($)
   $buildtime{$package} = $t;
 }
 
-$fn = "$ddir/_jobhistory.xml";
-if (! -e $fn) {
-	print "retreiving jobhistory\n";
-	system("osc api '/build/$dist/_jobhistory?code=lastfailures' > $fn");
+$file = ($srcdir?$srcdir:$ddir)."/_jobhistory.xml";
+if (! -e $file) {
+  die "_jobhistory.xml not found" if $srcdir;
+  print "retreiving jobhistory\n";
+  system("osc api '/build/$dist/_jobhistory?code=lastfailures' > $file");
 }
 my $p1 = new XML::Parser(
   Handlers => {
     Start => \&handle_start
   });
 taskstart "parsing jobhistory";
-$p1->parsefile($fn, ProtocolEncoding => 'UTF-8');
+$p1->parsefile($file, ProtocolEncoding => 'UTF-8');
 taskdone;
 
 for $pack (@packs_to_setup) {
