@@ -13,11 +13,15 @@ sub hhmm {
 }
 
 sub render {
-  my ($dist, $width, $height, $numpacks, $nbuild, $nwait, $inttimes) = @_;
-  use Data::Dumper;
-  #print Dumper($numpacks, $nbuild, $nwait);
-  my $maxnbuild = 0;
+  my %params = @_;
+  my $dist = $params{'dist'} || '';
+  my $width = $params{'width'} || 800;
+  my $height = $params{'height'} || 600;
+  my $nbuild = $params{'nbuild'} || {};
+  my $nwait = $params{'nwait'} || {};
+  my $inttimes = $params{'inttimes'} || {};
 
+  my $maxnbuild = 0;
   my $maxtime = 0;
   for (keys %$nbuild) {
     $maxnbuild = $nbuild->{$_} if ($maxnbuild < $nbuild->{$_});
@@ -25,7 +29,6 @@ sub render {
   }
 
   my $nn = $maxnbuild * 1.2;
-  $nn = $numpacks if $numpacks < $nn;
 
   my $yaxisround;
   $yaxisround = $nn > 200 ? 100 : 10;

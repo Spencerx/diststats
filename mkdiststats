@@ -571,7 +571,14 @@ my %inttimes = ();
 
 require RebuildGraph;
 open(IMG, ">$ddir/rebuild.png") || die("$ddir/rebuild.png: $!\n");
-print IMG RebuildGraph::render($dist, $width, $height, $numpacks, \%nbuild, \%nwait, \%inttimes);
+print IMG RebuildGraph::render(
+  dist => $dist,
+  width => $width,
+  height => $height,
+  nbuild => \%nbuild,
+  nwait => \%nwait,
+  inttimes => \%inttimes
+);
 close IMG;
 
 no strict;
