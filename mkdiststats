@@ -461,15 +461,17 @@ close FOO;
 
 drawgraph:
 if ($opt_justgraph) {
-    open(FOO, '<', "$ddir/deps") || die "$!";
-    eval join('', <FOO>);
-    close FOO;
-    open(FOO, '<', "$ddir/simul") || die "$!";
-    eval join('', <FOO>);
-    close FOO;
-    for (keys %nbuild) {
-      $maxtime = $_ if ($maxtime < $_);
-    }
+  taskstart "reading deps";
+  open(FOO, '<', "$ddir/deps") || die "$!";
+  eval join('', <FOO>);
+  close FOO;
+  open(FOO, '<', "$ddir/simul") || die "$!";
+  eval join('', <FOO>);
+  close FOO;
+  for (keys %nbuild) {
+    $maxtime = $_ if ($maxtime < $_);
+  }
+  taskdone;
 }
 
 my $packalias = {};
@@ -558,7 +560,6 @@ $h=hhmm($maxtime);
 $in =~ s/\<REBUILDTIME\>/$h/sg;
 $in =~ s/\<NUMPACKS\>/$numpacks/sg;
 
-print "making longes table\n";
 $colspan = $lastfincols * 3 + 1;
 $ltab = "<table cellpadding=0 cellspacing=0 border=0>\n<tr>\n<td colspan=$colspan width=1 bgcolor=\"#336699\"><img src=void.gif width=1 height=1 border=0></td>\n</tr>\n";
 for $lf (@longest) {
@@ -582,7 +583,6 @@ for $lf (@longest) {
 $ltab .= "<tr>\n<td colspan=$colspan width=1 bgcolor=\"#336699\"><img src=void.gif width=1 height=1 border=0></td>\n</tr>\n</table>\n";
 $in =~ s/\<TABLE_LONGEST\>/$ltab/s;
 
-print "making buildtime table\n";
 my @buildtime = sort {$buildtime{$b} <=> $buildtime{$a}} @packs_to_setup;
 $rtab = "<table cellpadding=0 cellspacing=0 border=0>\n<tr>\n<td colspan=7 width=1 bgcolor=\"#336699\"><img src=void.gif width=1 height=1 border=0></td>\n</tr>\n";
 $rtab .= "<tr>\n";
