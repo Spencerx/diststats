@@ -535,7 +535,7 @@ for my $p (reverse @$last) {
   push @longest, $path;
   $lastfincols = @$path if $lastfincols < @$path;
   ++$i;
-  last unless $opt_interesting || $i < 10;
+  last unless $opt_interesting || $i < $numlongest;
 }
 
 my %inttimes = ();
