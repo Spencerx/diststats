@@ -27,6 +27,7 @@ my $verbose;
 my $maxiter = 0;
 my $ddir;
 my $srcdir;
+my $opt_timing;
 
 my $numlongest = 10;
 
@@ -40,6 +41,7 @@ GetOptions (
     'debug' => \$debug,
     'destdir=s' => \$ddir,
     'srcdir=s' => \$srcdir,
+    'timing' => \$opt_timing,
 ) or exit(1);
 
 my %subpacks;
@@ -67,11 +69,13 @@ sub hhmm {
 
 my $starttime;
 sub taskstart {
+  return unless $opt_timing;
   print $_[0], " ...\n";
   $starttime = time;
 }
 
 sub taskdone {
+  return unless $opt_timing;
   my $t = time-$starttime;
   print "done in $t secs\n";
 }
@@ -569,6 +573,8 @@ my %inttimes = ();
   }
 }
 
+taskstart "creating output";
+
 require RebuildGraph;
 open(IMG, ">$ddir/rebuild.png") || die("$ddir/rebuild.png: $!\n");
 print IMG RebuildGraph::render(
@@ -643,3 +649,5 @@ $in =~ s/\<TABLE_LONGPACKS\>/$rtab/s;
 open(IN, ">$ddir/index.html") || die("$ddir/index.html: $!\n");
 print IN $in;
 close IN;
+
+taskdone;
