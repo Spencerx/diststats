@@ -29,6 +29,7 @@ my $ddir;
 my $srcdir;
 my $opt_timing;
 my $outfmt = 'html';
+my $opt_nopackalias;
 
 my $numlongest = 10;
 
@@ -46,6 +47,7 @@ GetOptions (
     'width=i' => \$opt_width,
     'height=i' => \$opt_height,
     'outfmt=s' => \$outfmt,
+    'nopackalias' => \$opt_nopackalias,
 ) or exit(1);
 
 die "invalid output format\n" unless ($outfmt eq 'html' || $outfmt eq 'plain');
@@ -515,12 +517,14 @@ sub output
   }
 
   my $packalias = {};
-  $packalias->{$firstcycle} = 'basepacks' if $firstcycle;
-  for my $p (@done) {
-    next unless $p =~ /^OpenOffice_org/;
-    my $q = $p;
-    $q =~ s/OpenOffice_org/OOo/;
-    $packalias->{$p} = $q;
+  if (!$opt_nopackalias) {
+    $packalias->{$firstcycle} = 'basepacks' if $firstcycle;
+    for my $p (@done) {
+      next unless $p =~ /^OpenOffice_org/;
+      my $q = $p;
+      $q =~ s/OpenOffice_org/OOo/;
+      $packalias->{$p} = $q;
+    }
   }
 
   my $last;
