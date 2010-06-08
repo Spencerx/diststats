@@ -6,8 +6,12 @@ use strict;
 use GD;
 use Time::Local 'timelocal_nocheck';
 
+use Data::Dumper;
+
 use Getopt::Long;
 Getopt::Long::Configure("no_ignore_case");
+
+require XML::Parser;
 
 # graph dimensions
 my $width = 1000;
@@ -90,20 +94,20 @@ my $pack = undef;
 my $text = '';
 
 sub handle_builddep($)
-  {
-      my $self = shift;
-      my $name = shift;
-      my %attrs = @_;
-      if ($name eq 'package' && exists $attrs{"name"}) {
-	$pack = $attrs{"name"};
-	my @array;
-        $deps{$pack} = [ @array ];	
-        $subpacks{$pack} = [ @array ];
-        push @packs_to_setup, $pack;
-      } elsif ($name eq 'pkgdep' || $name eq 'subpkg') {
-	$text = '';
-      }
-      return;
+{
+  my $self = shift;
+  my $name = shift;
+  my %attrs = @_;
+  if ($name eq 'package' && exists $attrs{"name"}) {
+    $pack = $attrs{"name"};
+    my @array;
+    $deps{$pack} = [ @array ];	
+    $subpacks{$pack} = [ @array ];
+    push @packs_to_setup, $pack;
+  } elsif ($name eq 'pkgdep' || $name eq 'subpkg') {
+    $text = '';
+  }
+  return;
 }
 
 sub handle_end_builddep($)
@@ -126,13 +130,17 @@ sub handle_ch_builddep($) {
    $text .= shift;
 }
 
-require XML::Parser;
-my $pdep = new XML::Parser( Handlers => {Start => \&handle_builddep, End => \&handle_end_builddep, Char => \&handle_ch_builddep});
+my $pdep = new XML::Parser(
+  Handlers => {
+    Start => \&handle_builddep,
+    End => \&handle_end_builddep,
+    Char => \&handle_ch_builddep
+  });
 
 my $fn = "$ddir/_builddepinfo.xml";
 if (! -e $fn) {
-	print "retreiving builddepinfo\n";
-	system("osc api '/build/$dist/_builddepinfo' > $fn");
+  print "retreiving builddepinfo\n";
+  system("osc api '/build/$dist/_builddepinfo' > $fn");
 }
 taskstart "parsing build deps";
 $pdep->parsefile($fn, ProtocolEncoding => 'UTF-8');
@@ -141,44 +149,46 @@ taskdone;
 
 #goto nixda;
 
-use Data::Dumper;
 sub handle_start($)
-  {  
-      my $self = shift;
-      my $tag = shift;
-      return unless ($tag eq 'jobhist');
-      my %attrs = @_;
-      #print Dumper(\%attrs) . "\n";
-      my $package = $attrs{"package"};
-      my $client = $attrs{"workerid"};
-      my $readytime = $attrs{"readytime"};
-      my $starttime = $attrs{"starttime"};
-      my $endtime = $attrs{"endtime"};
+{  
+  my $self = shift;
+  my $tag = shift;
+  return unless ($tag eq 'jobhist');
+  my %attrs = @_;
+  #print Dumper(\%attrs) . "\n";
+  my $package = $attrs{"package"};
+  my $client = $attrs{"workerid"};
+  my $readytime = $attrs{"readytime"};
+  my $starttime = $attrs{"starttime"};
+  my $endtime = $attrs{"endtime"};
 
   my $t = $endtime - $starttime;
   my $ti = $starttime - $readytime;
   my $tb = $endtime - $readytime;
 
   if ($attrs{"code"} eq "failed") {
-      #print "FAILED: $package $t $ti $tb\n";
-      if (!exists $failed{$package} || $failed{$package} < $t) {
-	  $failed{$package} = $t;
-      }
-      return;
+    #print "FAILED: $package $t $ti $tb\n";
+    if (!exists $failed{$package} || $failed{$package} < $t) {
+      $failed{$package} = $t;
+    }
+    return;
   }
   if (!exists $packmin_m{$package} || $packmin_m{$package}->[0] > $t) {
     $packmin_m{$package} = [$t, $ti, $tb];
   }
   return unless !$packmin{$package} || $packmin{$package} > $t;
   $packmin{$package} = $t;
-  }
+}
 
 $fn = "$ddir/_jobhistory.xml";
 if (! -e $fn) {
 	print "retreiving jobhistory\n";
 	system("osc api '/build/$dist/_jobhistory?code=lastfailures' > $fn");
 }
-my $p1 = new XML::Parser( Handlers => {Start => \&handle_start});
+my $p1 = new XML::Parser(
+  Handlers => {
+    Start => \&handle_start
+  });
 taskstart "parsing jobhistory";
 $p1->parsefile($fn, ProtocolEncoding => 'UTF-8');
 taskdone;
