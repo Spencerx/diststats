@@ -466,8 +466,6 @@ while (my ($p, $ti) = each %finished) {
 }
 close OUT;
 
-#print Dumper(\@longest);
-
 drawgraph:
 if ($opt_justgraph) {
   taskstart "reading deps";
@@ -480,6 +478,7 @@ if ($opt_justgraph) {
     } elsif ($a[0] eq 'b') {
       $buildtime{$a[1]} = $a[2];
       $pdeps{$a[1]} = [@a[3 .. $#a]];
+      push @packs_to_setup, $a[1] unless $a[1] =~ /,/;
     }
   }
   close IN;
@@ -548,7 +547,7 @@ for my $p (reverse @$last) {
   last unless $opt_interesting || $i < $numlongest;
 }
 
-# intersting points in time
+# interesting points in time
 my %inttimes = ();
 
 {
