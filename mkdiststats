@@ -367,16 +367,16 @@ if ($debug) {
   close FOO;
 }
 
-my $firstcycle;
 if ($options{'basepack'} && exists $cycles{$options{'basepack'}}) {
-  $firstcycle = $cycles{$options{'basepack'}};
+  my $basecycle = $cycles{$options{'basepack'}};
+  $packalias->{$basecycle} = 'basepacks';
   if ($verbose) {
     print "Basepacks timings:\n";
     for $pack (split(',', $cycles{$options{'basepack'}})) {
       print "$pack: $buildtime{$pack}\n";
     }
     print "Total: ", hhmm($buildtime{$cycles{'autoconf'}}),"\n";
-    print "first cycle: $firstcycle\n";
+    print "Base cycle: $basecycle\n";
   }
 }
 
@@ -408,7 +408,9 @@ my $ti = 0;
 my $nbuild = 0;
 
 open(FOO, '>', "$ddir/deps");
-print FOO "f $firstcycle\n" if $firstcycle;
+while (my ($k, $v) = each %$packalias) {
+  printf FOO "a %s %s\n", $k, $v;
+}
 while (my ($p, $d) = each %pdeps) {
   print FOO "b $p ", $buildtime{$p}, ' ', join(' ', @$d), "\n";
 }
@@ -512,8 +514,8 @@ sub output
     while (<IN>) {
       chomp;
       my @a = split(/ /);
-      if ($a[0] eq 'f') {
-	$firstcycle = $a[1];
+      if ($a[0] eq 'a') {
+	$packalias->{$a[1]} = $a[2];
       } elsif ($a[0] eq 'b') {
 	$buildtime{$a[1]} = $a[2];
 	$pdeps{$a[1]} = [@a[3 .. $#a]];
@@ -542,7 +544,6 @@ sub output
     taskdone;
   }
 
-  $packalias->{$firstcycle} = 'basepacks' if $firstcycle;
   if (!$opt_nopackalias) {
     for my $p (@done) {
       next unless $p =~ /^OpenOffice_org/;
