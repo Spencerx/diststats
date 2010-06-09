@@ -31,6 +31,7 @@ my $opt_timing;
 my $outfmt = 'html';
 my $opt_nopackalias;
 my $opt_graph_start;
+my @packs_to_setup;
 
 my %options;
 
@@ -52,6 +53,7 @@ GetOptions(
   'graph-start=s' => \$opt_graph_start,
   'numlongest=s',
   'basepack:s',
+  'package:s' => \@packs_to_setup,
 ) or exit(1);
 
 $options{'basepack'} = 'autoconf' unless exists $options{'basepack'};
@@ -77,7 +79,6 @@ my %outputfunction = (
 die "invalid output format\n" unless exists $outputfunction{$outfmt};
 
 my %subpacks;
-my @packs_to_setup;
 my %deps;
 my %subpack2pack;
 my %failed;
@@ -147,7 +148,6 @@ sub handle_builddep($)
     my @array;
     $deps{$pack} = [ @array ];	
     $subpacks{$pack} = [ @array ];
-    push @packs_to_setup, $pack;
   } elsif ($name eq 'pkgdep' || $name eq 'subpkg') {
     $text = '';
   }
@@ -236,7 +236,7 @@ taskstart "parsing jobhistory";
 $p1->parsefile($file, ProtocolEncoding => 'UTF-8');
 taskdone;
 
-for $pack (@packs_to_setup) {
+for $pack (keys %deps) {
   if (!$buildtime{$pack}) {
     if ($failed{$pack}) {
 	$buildtime{$pack} = $failed{$pack};
@@ -256,7 +256,7 @@ for $pack (@packs_to_setup) {
 
 taskstart "calculating dependencies";
 # map dependencies to real packages, ignore - deps, filter out self
-for $pack (@packs_to_setup) {
+for $pack (keys %deps) {
   #$pdeps{$pack} = [ unify(grep {$_ ne $pack} map {$subpack2pack{$_} || ()} grep {!/^-/} @{$deps{$pack} || []}) ];
   my @dl;
   for my $dep (@{$deps{$pack}}) {
@@ -280,8 +280,6 @@ for $pack (@packs_to_setup) {
 }
 taskdone;
 
-@todo = @packs_to_setup;
-
 if ($debug) {
   open(FOO, '>', "$ddir/dep1");
   print FOO Data::Dumper->Dump(
@@ -302,13 +300,15 @@ if ($debug) {
   close FOO;
 }
 
-my $numpacks = @todo;
-
 taskstart "computing dependency graph";
 
 use Dfs;
 my $dfs = new Dfs(\%pdeps);
-$dfs->startrdfs(@todo);
+$dfs->startrdfs(@packs_to_setup);
+
+@todo = keys %{$dfs->{'begintime'}};
+
+my $numpacks = @todo;
 
 taskdone;
 
@@ -524,7 +524,6 @@ sub output
       } elsif ($a[0] eq 'b') {
 	$buildtime{$a[1]} = $a[2];
 	$pdeps{$a[1]} = [@a[3 .. $#a]];
-	push @packs_to_setup, $a[1] unless $a[1] =~ /,/;
       }
     }
     close IN;
@@ -541,11 +540,11 @@ sub output
 	$finished{$a[1]} = $a[2];
       }
     }
-    @done = sort {$finished{$a} <=> $finished{$b}} keys %finished;
     close IN;
     for (keys %nbuild) {
       $maxtime = $_ if ($maxtime < $_);
     }
+    @done = sort { $finished{$a} <=> $finished{$b} } keys %finished;
     taskdone;
   }
 
@@ -558,19 +557,20 @@ sub output
     }
   }
 
-  my $last;
-
+  my @last;
   if ($opt_interesting) {
-    $last = [$opt_interesting];
+    @last = ($opt_interesting);
+  } elsif (@packs_to_setup) {
+    @last = @packs_to_setup;
   } else {
-    $last = \@done;
+    @last = reverse @done;
   }
 
   my @longestpaths;
   my %longestpaths;
   my $i = 0;
   my $numlongest = $options{'numlongest'} || 10;
-  for my $p (reverse @$last) {
+  for my $p (@last) {
     next if exists $longestpaths{$p};
     my $path = [];
     while(1) {
@@ -602,6 +602,7 @@ sub output
 	$needed{$_}++;
       }
     }
+    #print Dumper($finished{'dosbox'});
 
     for my $p (@{$longestpaths[0]}) {
       # skip package with short build time that doesn't trigger many
@@ -634,7 +635,7 @@ sub output
   );
   close IMG;
 
-  my @longestbuildtime = sort {$buildtime{$b} <=> $buildtime{$a}} @packs_to_setup;
+  my @longestbuildtime = sort {$buildtime{$b} <=> $buildtime{$a}} grep { ! /,/; } keys %buildtime;
   @longestbuildtime = splice(@longestbuildtime, 0, 20);
 
   &{ $outputfunction{$outfmt} }($packalias, \@longestpaths, \@longestbuildtime);
