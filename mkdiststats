@@ -31,28 +31,30 @@ my $opt_timing;
 my $outfmt = 'html';
 my $opt_nopackalias;
 my $opt_graph_start;
-my $opt_basepack = 'autoconf';
 
-my $numlongest = 10;
+my %options;
 
-GetOptions (
-    'justgraph' => \$opt_justgraph,
-    'numlongest=s' => \$numlongest,
-    'interesting=s' => \$opt_interesting,
-    'allinteresting' => \$opt_allinteresting,
-    'verbose+' => \$verbose,
-    'maxiter' => \$maxiter,
-    'debug' => \$debug,
-    'destdir=s' => \$ddir,
-    'srcdir=s' => \$srcdir,
-    'timing' => \$opt_timing,
-    'width=i' => \$opt_width,
-    'height=i' => \$opt_height,
-    'outfmt=s' => \$outfmt,
-    'nopackalias' => \$opt_nopackalias,
-    'graph-start=s' => \$opt_graph_start,
-    'basepack:s' => \$opt_basepack,
+GetOptions(
+  \%options,
+  'justgraph' => \$opt_justgraph,
+  'interesting=s' => \$opt_interesting,
+  'allinteresting' => \$opt_allinteresting,
+  'verbose+' => \$verbose,
+  'maxiter' => \$maxiter,
+  'debug' => \$debug,
+  'destdir=s' => \$ddir,
+  'srcdir=s' => \$srcdir,
+  'timing' => \$opt_timing,
+  'width=i' => \$opt_width,
+  'height=i' => \$opt_height,
+  'outfmt=s' => \$outfmt,
+  'nopackalias' => \$opt_nopackalias,
+  'graph-start=s' => \$opt_graph_start,
+  'numlongest=s',
+  'basepack:s',
 ) or exit(1);
+
+$options{'basepack'} = 'autoconf' unless exists $options{'basepack'};
 
 if ($opt_graph_start) {
   if($opt_graph_start =~ /(\d{1,2}):(\d{2})/) {
@@ -366,12 +368,11 @@ if ($debug) {
 }
 
 my $firstcycle;
-if ($opt_basepack && exists $cycles{$opt_basepack}) {
-  $firstcycle = $cycles{$opt_basepack};
-  $packalias->{$firstcycle} = 'basepacks';
+if ($options{'basepack'} && exists $cycles{$options{'basepack'}}) {
+  $firstcycle = $cycles{$options{'basepack'}};
   if ($verbose) {
     print "Basepacks timings:\n";
-    for $pack (split(',', $cycles{$opt_basepack})) {
+    for $pack (split(',', $cycles{$options{'basepack'}})) {
       print "$pack: $buildtime{$pack}\n";
     }
     print "Total: ", hhmm($buildtime{$cycles{'autoconf'}}),"\n";
@@ -541,6 +542,7 @@ sub output
     taskdone;
   }
 
+  $packalias->{$firstcycle} = 'basepacks' if $firstcycle;
   if (!$opt_nopackalias) {
     for my $p (@done) {
       next unless $p =~ /^OpenOffice_org/;
@@ -561,6 +563,7 @@ sub output
   my @longestpaths;
   my %longestpaths;
   my $i = 0;
+  my $numlongest = $options{'numlongest'} || 10;
   for my $p (reverse @$last) {
     next if exists $longestpaths{$p};
     my $path = [];
@@ -636,7 +639,7 @@ sub write_plain
   my ($packalias, $longestpaths, $longestbuildtime) = @_;
   open(OUT, '>', "$ddir/longest");
   print OUT "T $maxtime\n";
-  my %seen;
+  my %seen = map { $_ => 1 } @$longestbuildtime;
   for my $lf (@$longestpaths) {
     grep { $seen{$_} = 1; $_ = $packalias->{$_} if exists $packalias->{$_}; } @$lf;
     print OUT "l ", join(' ', @$lf), "\n";
