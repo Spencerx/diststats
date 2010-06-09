@@ -408,6 +408,11 @@ my $ti = 0;
 my $nbuild = 0;
 
 open(FOO, '>', "$ddir/deps");
+print FOO <<EOF
+# a X Y: alias Y for X
+# b PKG TIME DEPS...: build time TIME for PKG, dependencies DEPS
+EOF
+;
 while (my ($k, $v) = each %$packalias) {
   printf FOO "a %s %s\n", $k, $v;
 }
