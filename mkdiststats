@@ -23,7 +23,7 @@ my $opt_justgraph;
 my $opt_interesting;
 my $opt_allinteresting;
 my $debug;
-my $verbose;
+my $verbose = 0;
 my $maxiter = 0;
 my $ddir;
 my $srcdir;
@@ -31,6 +31,7 @@ my $opt_timing;
 my $outfmt = 'html';
 my $opt_nopackalias;
 my $opt_graph_start;
+my $opt_basepack = 'autoconf';
 
 my $numlongest = 10;
 
@@ -39,7 +40,7 @@ GetOptions (
     'numlongest=s' => \$numlongest,
     'interesting=s' => \$opt_interesting,
     'allinteresting' => \$opt_allinteresting,
-    'verbose' => \$verbose,
+    'verbose+' => \$verbose,
     'maxiter' => \$maxiter,
     'debug' => \$debug,
     'destdir=s' => \$ddir,
@@ -50,9 +51,8 @@ GetOptions (
     'outfmt=s' => \$outfmt,
     'nopackalias' => \$opt_nopackalias,
     'graph-start=s' => \$opt_graph_start,
+    'basepack:s' => \$opt_basepack,
 ) or exit(1);
-
-die "invalid output format\n" unless ($outfmt eq 'html' || $outfmt eq 'plain');
 
 if ($opt_graph_start) {
   if($opt_graph_start =~ /(\d{1,2}):(\d{2})/) {
@@ -61,6 +61,18 @@ if ($opt_graph_start) {
     die "--graph-start must be numeric\n";
   }
 }
+
+sub write_html;
+sub write_plain;
+sub write_xml;
+
+my %outputfunction = (
+  plain => \&write_plain,
+  html => \&write_html,
+  xml => \&write_xml,
+);
+
+die "invalid output format\n" unless exists $outputfunction{$outfmt};
 
 my %subpacks;
 my @packs_to_setup;
@@ -73,6 +85,8 @@ my @todo;
 my @basesubpacks;
 my @done;
 my $maxtime = 0;
+
+my $packalias = {};
 
 sub unify {
     my %h = map {$_ => 1} @_;
@@ -352,11 +366,12 @@ if ($debug) {
 }
 
 my $firstcycle;
-if (exists $cycles{'autoconf'}) {
-  $firstcycle = $cycles{'autoconf'};
+if ($opt_basepack && exists $cycles{$opt_basepack}) {
+  $firstcycle = $cycles{$opt_basepack};
+  $packalias->{$firstcycle} = 'basepacks';
   if ($verbose) {
     print "Basepacks timings:\n";
-    for $pack (split(',', $cycles{'autoconf'})) {
+    for $pack (split(',', $cycles{$opt_basepack})) {
       print "$pack: $buildtime{$pack}\n";
     }
     print "Total: ", hhmm($buildtime{$cycles{'autoconf'}}),"\n";
@@ -427,7 +442,7 @@ while ($nwait || $nbuild)
     my $nfinish = @{$building{$ti}};
     $nbuild -= $nfinish;
     for my $p (@{$building{$ti}}) {
-      print "$ti: finished $p\n" if $verbose;
+      print "$ti: finished $p\n" if $verbose > 1;
       push @done, $p;
       $finished{$p} = $ti;
       for my $dep (@{$dfs->{'reversedgraph'}->{$p}}) {
@@ -448,14 +463,14 @@ while ($nwait || $nbuild)
     my $eti = 0;
     $eti = $buildtime{$p};
     $eti += $ti;
-    print "$ti: starting $p, will finish at $eti\n" if $verbose;
+    print "$ti: starting $p, will finish at $eti\n" if $verbose > 1;
     $building{$eti} = [] unless exists $building{$eti};
     push @{$building{$eti}}, $p;
   }
 
   $nbuild{$ti} = $nbuild;
   $nwait{$ti}  = $nwait;
-  print "$ti: build $nbuild wait $nwait started $numstarted\n" if $verbose;
+  print "$ti: build $nbuild wait $nwait started $numstarted\n" if $verbose > 1;
 
   if ($nbuild == 0 && $nwait > 0) {
     die "deadlocked\n";
@@ -526,9 +541,7 @@ sub output
     taskdone;
   }
 
-  my $packalias = {};
   if (!$opt_nopackalias) {
-    $packalias->{$firstcycle} = 'basepacks' if $firstcycle;
     for my $p (@done) {
       next unless $p =~ /^OpenOffice_org/;
       my $q = $p;
@@ -545,15 +558,15 @@ sub output
     $last = \@done;
   }
 
-  my @longest;
-  my %longest;
+  my @longestpaths;
+  my %longestpaths;
   my $i = 0;
   for my $p (reverse @$last) {
-    next if exists $longest{$p};
+    next if exists $longestpaths{$p};
     my $path = [];
     while(1) {
       push @$path, $p;
-      $longest{$p} = 1;
+      $longestpaths{$p} = 1;
       last unless @{$pdeps{$p}};
       my $l;
       for my $dep (@{$pdeps{$p}}) {
@@ -565,7 +578,7 @@ sub output
       }
       $p = $l;
     }
-    push @longest, $path;
+    push @longestpaths, $path;
     ++$i;
     last unless $opt_interesting || $i < $numlongest;
   }
@@ -581,7 +594,7 @@ sub output
       }
     }
 
-    for my $p (@{$longest[0]}) {
+    for my $p (@{$longestpaths[0]}) {
       # skip package with short build time that doesn't trigger many
       # other packages
       next if !$opt_allinteresting && $buildtime{$p} < 900 && $needed{$p} < 20;
@@ -612,19 +625,19 @@ sub output
   );
   close IMG;
 
-  sub write_html;
-  write_html($packalias, \@longest) if $outfmt eq 'html';
-  sub write_plain;
-  write_plain($packalias, \@longest) if $outfmt eq 'plain';
+  my @longestbuildtime = sort {$buildtime{$b} <=> $buildtime{$a}} @packs_to_setup;
+  @longestbuildtime = splice(@longestbuildtime, 0, 20);
+
+  &{ $outputfunction{$outfmt} }($packalias, \@longestpaths, \@longestbuildtime);
 }
 
 sub write_plain
 {
-  my ($packalias, $longest) = @_;
+  my ($packalias, $longestpaths, $longestbuildtime) = @_;
   open(OUT, '>', "$ddir/longest");
   print OUT "T $maxtime\n";
   my %seen;
-  for my $lf (@$longest) {
+  for my $lf (@$longestpaths) {
     grep { $seen{$_} = 1; $_ = $packalias->{$_} if exists $packalias->{$_}; } @$lf;
     print OUT "l ", join(' ', @$lf), "\n";
   }
@@ -634,9 +647,35 @@ sub write_plain
   close OUT;
 }
 
+sub write_xml
+{
+  my ($packalias, $longestpaths, $longestbuildtime) = @_;
+  open(OUT, '>', "$ddir/longest.xml");
+  print OUT "<diststats>\n";
+  print OUT "<rebuildtime>$maxtime</rebuildtime>\n";
+  my %seen = map { $_ => 1 } @$longestbuildtime;
+  print OUT "<longestpath>\n";
+  for my $lf (@$longestpaths) {
+    grep { $seen{$_} = 1; $_ = $packalias->{$_} if exists $packalias->{$_}; } @$lf;
+    print OUT "<path>\n";
+    for (@$lf) {
+      print OUT "<package>$_</package>\n";
+    }
+    print OUT "</path>\n";
+  }
+  print OUT "</longestpath>\n";
+  print OUT "<timings>\n";
+  for my $p (keys %seen) {
+    printf OUT "<package name=\"%s\" buildtime=\"%d\" finished=\"%d\"/>\n", ($packalias->{$p}||$p), $buildtime{$p}, $finished{$p};
+  }
+  print OUT "</timings>\n";
+  print OUT "</diststats>\n";
+  close OUT;
+}
+
 sub write_html
 {
-  my ($packalias, $longest) = @_;
+  my ($packalias, $longestpaths, $longestbuildtime) = @_;
 
   open(IN, "<$templdir/disttemplate.html") || die("$templdir/disttemplate.html: $!\n");
   my $in = '';
@@ -650,12 +689,12 @@ sub write_html
 
 
   my $lastfincols = 0;
-  for my $lf (@$longest) {
+  for my $lf (@$longestpaths) {
     $lastfincols = @$lf if $lastfincols < @$lf;
   }
   my $colspan = $lastfincols * 3 + 1;
   my $ltab = "<table cellpadding=0 cellspacing=0 border=0>\n<tr>\n<td colspan=$colspan width=1 bgcolor=\"#336699\"><img src=void.gif width=1 height=1 border=0></td>\n</tr>\n";
-  for my $lf (@$longest) {
+  for my $lf (@$longestpaths) {
     $ltab .= "<tr>\n";
     unshift @$lf, '' while @$lf < $lastfincols;
     for my $q (@$lf) {
@@ -676,7 +715,6 @@ sub write_html
   $ltab .= "<tr>\n<td colspan=$colspan width=1 bgcolor=\"#336699\"><img src=void.gif width=1 height=1 border=0></td>\n</tr>\n</table>\n";
   $in =~ s/\<TABLE_LONGEST\>/$ltab/s;
 
-  my @buildtime = sort {$buildtime{$b} <=> $buildtime{$a}} @packs_to_setup;
   my $rtab = "<table cellpadding=0 cellspacing=0 border=0>\n<tr>\n<td colspan=7 width=1 bgcolor=\"#336699\"><img src=void.gif width=1 height=1 border=0></td>\n</tr>\n";
   $rtab .= "<tr>\n";
   $rtab .= "<td width=1 bgcolor=\"#336699\"><img src=\"void.gif\" width=1 height=18 border=0></td>\n";
@@ -687,7 +725,7 @@ sub write_html
   $rtab .= "<td width=1 bgcolor=\"#336699\"><img src=\"void.gif\" width=1 height=1 border=0></td>\n";
   $rtab .= "</tr>\n";
   $rtab .= "<tr>\n<td colspan=7 width=1 bgcolor=\"#336699\"><img src=void.gif width=1 height=1 border=0></td>\n</tr>\n";
-  for $pack (splice(@buildtime, 0, 50)) {
+  for $pack (@$longestbuildtime) {
     $rtab .= "<tr>\n";
     $rtab .= "<td width=1 bgcolor=\"#336699\"><img src=\"void.gif\" width=1 height=18 border=0></td>\n";
     $rtab .= "<td bgcolor=\"#eeeeee\">&nbsp;$pack&nbsp;</td>\n";
