@@ -157,9 +157,11 @@ sub rdfsvisit
 	    push @{$self->{'reversedgraph'}->{$p}}, $k;
 	    $self->{'reverseorder'}->{$k}++;
 	    # take the longer route
-	    if (exists $self->{'parent'}->{$p} && exists $self->{'parent'}->{$k} && $self->{'parent'}->{$p} eq $self->{'parent'}->{$k}) {
-		$self->{'parent'}->{$p}=$k;
-	    }
+	    #if (exists $self->{'parent'}->{$p}
+	    #&& exists $self->{'parent'}->{$k}
+	    #&& $self->{'parent'}->{$p} eq $self->{'parent'}->{$k}) {
+	    #	$self->{'parent'}->{$p}=$k;
+	    #}
 	}
     }
     $self->{'endtime'}->{$k}=$self->{'time'};
