@@ -37,6 +37,7 @@ my @packs_to_setup;
 my $nbuildhosts;
 my $dfs;
 my $depsprecomputed;
+my $opt_scheduler = 'fifo';
 
 my %options;
 
@@ -61,6 +62,7 @@ GetOptions(
   'package:s' => \@packs_to_setup,
   'buildhosts=i' => \$nbuildhosts,
   'fromscratch',
+  'scheduler=s' => \$opt_scheduler,
 ) or exit(1);
 
 $options{'basepack'} = 'autoconf' unless exists $options{'basepack'};
@@ -84,6 +86,11 @@ my %outputfunction = (
 );
 
 die "invalid output format\n" unless exists $outputfunction{$outfmt};
+
+my @scheduler = (qw/fifo lifo/);
+my %scheduler = map { $_ => \&{'scheduler_'.$_} } @scheduler;
+die "invalid scheduler $opt_scheduler\n" unless exists $scheduler{$opt_scheduler};
+my $scheduler = $scheduler{$opt_scheduler};
 
 my %subpacks;
 my %deps;
@@ -493,12 +500,6 @@ for my $p (splice @todo) {
 
 taskstart "Starting simulation with $nwait packages";
 
-sub readypackage
-{
-  return undef if $nbuildhosts && $nbuild >= $nbuildhosts;
-  pop @todo;
-}
-
 my %building;
 my %finished;
 while ($nwait || $nbuild)
@@ -525,7 +526,7 @@ while ($nwait || $nbuild)
 
   die "BUG: nwait < 0\n" if $nwait < 0;
   my $nstarted = 0;
-  while (my $p = readypackage()) {
+  while (my $p = &$scheduler()) {
     my $eti = 0;
     $eti = $buildtime{$p};
     $eti += $ti;
@@ -668,7 +669,7 @@ sub output
     if ($verbose) {
       print "Interesting:\n";
       for my $t (sort {$a <=> $b} keys %inttimes) {
-	print "$t: $inttimes{$t}\n";
+	print hhmm($t),": $inttimes{$t}\n";
       }
     }
   }
@@ -815,3 +816,14 @@ sub write_html
 
 output;
 
+sub scheduler_fifo
+{
+  return undef if $nbuildhosts && $nbuild >= $nbuildhosts;
+  pop @todo;
+}
+
+sub scheduler_lifo
+{
+  return undef if $nbuildhosts && $nbuild >= $nbuildhosts;
+  shift @todo;
+}
