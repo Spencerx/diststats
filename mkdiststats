@@ -464,6 +464,14 @@ $dfs->startrdfs(@todo);
 #print Dumper($dfs->{'reversedgraph'});
 #print Dumper($dfs->{'reverseorder'});
 
+if ($debug) {
+  open(OUT, '>', "$ddir/dfs");
+  for my $p (sort { $dfs->{'endtime'}->{$b} <=> $dfs->{'endtime'}->{$a}} keys %{$dfs->{'endtime'}}) {
+    printf OUT "%s %d %d\n", $p, $dfs->{'endtime'}->{$p}, $dfs->{'begintime'}->{$p};
+  }
+  close OUT;
+}
+
 if ($depsprecomputed) {
   @todo = keys %{$dfs->{'begintime'}};
 }
@@ -473,6 +481,14 @@ for my $p (@todo) {
   for (@{$pdeps{$p}}) {
     $needed{$_}++;
   }
+}
+
+if ($debug) {
+  open(OUT, '>', "$ddir/needed");
+  for my $p (keys %needed) {
+    printf OUT "%s %d\n", $p, $needed{$p};
+  }
+  close OUT;
 }
 
 my $numpacks = @todo;
@@ -501,6 +517,7 @@ EOF
 my %nbuild = ();
 my %nwait = ();
 my %nscheduled = ();
+#my %nleafs = ();
 
 my $cnt = 0;
 
@@ -532,6 +549,12 @@ while ($nwait || $nbuild)
 	$dfs->{'reverseorder'}->{$dep}--;
 	push @todo, $dep if $dfs->{'reverseorder'}->{$dep} == 0;
       }
+      if (0) { # adjust needed
+	for my $dep (@{$pdeps{$p}}) {
+	  --$needed{$dep};
+	  die "BUG: needed $dep < 0\n" if $needed{$dep} < 0;
+	}
+      }
       delete $dfs->{'reverseorder'}->{$p};
     }
     delete $building{$ti};
@@ -539,6 +562,7 @@ while ($nwait || $nbuild)
 
   die "BUG: nwait < 0\n" if $nwait < 0;
   my $nstarted = 0;
+  #my $nleafs = 0;
   while (my $p = &$scheduler()) {
     my $eti = 0;
     $eti = $buildtime{$p};
@@ -549,13 +573,16 @@ while ($nwait || $nbuild)
     ++$nbuild;
     ++$nstarted;
     --$nwait;
+#    ++$nleafs if $needed{$p} == 0;
     last if $nbuildhosts && $nbuild >= $nbuildhosts;
   }
+  #$nleafs = grep { $needed{$_} == 0 } @todo;
 
   my $nscheduled = @todo;
   $nscheduled{$ti} = $nscheduled;
   $nbuild{$ti} = $nbuild;
   $nwait{$ti}  = $nwait;
+  #$nleafs{$ti}  = $nleafs;
   print "$ti: building $nbuild, blocked $nwait, started $nstarted, scheduled $nscheduled\n" if $verbose > 1;
 
   if ($nbuild == 0 && $nwait > 0 && !@todo) {
@@ -694,6 +721,7 @@ sub output
     height => $opt_height,
     nbuild => \%nbuild,
     nwait => \%nwait,
+    #nleafs => \%nleafs,
     nscheduled => \%nscheduled,
     inttimes => \%inttimes,
     starttime => ($opt_graph_start?$opt_graph_start:0),
@@ -863,6 +891,8 @@ sub scheduler_neededb
 {
   @todo = sort {$needed{$a} <=> $needed{$b} || $buildtime{$a} <=> $buildtime{$b}} @todo;
   #@todo = sort {$needed{$a} <=> $needed{$b} || @{$pdeps{$a}} <=> @{$pdeps{$b}} } @todo;
+  # doesn't make sense. due to stable sort this is equivalent to scheduler_needed
+  #@todo = sort {$needed{$a} <=> $needed{$b} || $ready{$b} <=> $ready{$a}} @todo;
   pop @todo;
 }
 
