@@ -469,7 +469,7 @@ if ($depsprecomputed) {
 }
 
 my %needed = map {$_ => 0} @todo;
-for my $p (@done) {
+for my $p (@todo) {
   for (@{$pdeps{$p}}) {
     $needed{$_}++;
   }
