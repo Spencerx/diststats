@@ -87,7 +87,11 @@ my %outputfunction = (
 
 die "invalid output format\n" unless exists $outputfunction{$outfmt};
 
-my @scheduler = (qw/fifo lifo/);
+if (!$nbuildhosts && $opt_scheduler ne "fifo") {
+  print STDERR "forcing fifo scheduler\n";
+  $opt_scheduler = "fifo";
+}
+my @scheduler = (qw/fifo lifo random btime needed longest/);
 my %scheduler = map { $_ => \&{'scheduler_'.$_} } @scheduler;
 die "invalid scheduler $opt_scheduler\n" unless exists $scheduler{$opt_scheduler};
 my $scheduler = $scheduler{$opt_scheduler};
@@ -464,6 +468,13 @@ if ($depsprecomputed) {
   @todo = keys %{$dfs->{'begintime'}};
 }
 
+my %needed = map {$_ => 0} @todo;
+for my $p (@done) {
+  for (@{$pdeps{$p}}) {
+    $needed{$_}++;
+  }
+}
+
 my $numpacks = @todo;
 
 my $ti = 0;
@@ -651,12 +662,6 @@ sub output
   my %inttimes = ();
 
   {
-    my %needed = map {$_ => 0} @done;
-    for my $p (@done) {
-      for (@{$pdeps{$p}}) {
-	$needed{$_}++;
-      }
-    }
     #print Dumper($finished{'dosbox'});
 
     for my $p (@{$longestpaths[0]}) {
@@ -752,6 +757,12 @@ sub write_html
   my $h=hhmm($maxtime);
   $in =~ s/\<REBUILDTIME\>/$h/sg;
   $in =~ s/\<NUMPACKS\>/$numpacks/sg;
+  if ($nbuildhosts) {
+    $in =~ s/\<NUMHOSTS\>/$nbuildhosts/sg;
+  } else {
+    $in =~ s/\<NUMHOSTS\>/infinite/sg;
+  }
+  $in =~ s/\<SCHEDULER\>/$opt_scheduler/sg;
 
 
   my $lastfincols = 0;
@@ -826,4 +837,53 @@ sub scheduler_lifo
 {
   return undef if $nbuildhosts && $nbuild >= $nbuildhosts;
   shift @todo;
+}
+
+sub scheduler_random
+{
+  return undef if $nbuildhosts && $nbuild >= $nbuildhosts;
+  splice(@todo, int(rand(@todo)),1);
+}
+
+sub scheduler_btime
+{
+  return undef if $nbuildhosts && $nbuild >= $nbuildhosts;
+  @todo = sort {$buildtime{$b} <=> $buildtime{$a}} @todo;
+  shift @todo;
+}
+
+sub scheduler_needed
+{
+  return undef if $nbuildhosts && $nbuild >= $nbuildhosts;
+  @todo = sort {$needed{$b} <=> $needed{$a}} @todo;
+  shift @todo;
+}
+
+my %scheduler_longest_data;
+my $scheduler_longest_triedread;
+sub scheduler_longest
+{
+  return undef if $nbuildhosts && $nbuild >= $nbuildhosts;
+  local *parse = sub {
+    open(IN, '<', "$ddir/simul") || return undef;
+    while (<IN>) {
+      chomp;
+      my @a = split(/ /);
+      if ($a[0] eq 'f') {
+	$scheduler_longest_data{$a[1]} = $a[2];
+      }
+    }
+    close IN;
+    1;
+  };
+  if (!$scheduler_longest_triedread) {
+    $scheduler_longest_triedread = 1;
+    if (!parse()) {
+      print STDERR "no previous simulation data, using fifo scheduler\n";
+    }
+  }
+  if (%scheduler_longest_data) {
+    @todo = sort {$scheduler_longest_data{$a} <=> $scheduler_longest_data{$b}} @todo;
+  }
+  pop @todo;
 }
