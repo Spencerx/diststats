@@ -32,6 +32,7 @@ my $outfmt = 'html';
 my $opt_nopackalias;
 my $opt_graph_start;
 my @packs_to_setup;
+my $nbuildhosts;
 
 my %options;
 
@@ -54,6 +55,7 @@ GetOptions(
   'numlongest=s',
   'basepack:s',
   'package:s' => \@packs_to_setup,
+  'buildhosts=i' => \$nbuildhosts,
 ) or exit(1);
 
 $options{'basepack'} = 'autoconf' unless exists $options{'basepack'};
@@ -437,13 +439,18 @@ for my $p (splice @todo) {
 
 taskstart "Starting simulation with $nwait packages";
 
+sub readypackage
+{
+  return undef if $nbuildhosts && $nbuild >= $nbuildhosts;
+  pop @todo;
+}
+
 my %building;
 my %finished;
 while ($nwait || $nbuild)
 {
   ++$cnt;
   last if $maxiter && $cnt > $maxiter;
-  my $numstarted = 0;
 
   if ($ti) {
     die "BUG: nothing finishes at $ti!\n" unless exists $building{$ti};
@@ -462,26 +469,26 @@ while ($nwait || $nbuild)
     delete $building{$ti};
   }
 
-  $nbuild += @todo;
-  $numstarted += @todo;
-  $nwait -= @todo;
-  die "nwait < 0\n" if $nwait < 0;
-  my $i = 0;
-  for my $p (splice @todo) {
+  die "BUG: nwait < 0\n" if $nwait < 0;
+  my $nstarted = 0;
+  while (my $p = readypackage()) {
     my $eti = 0;
     $eti = $buildtime{$p};
     $eti += $ti;
     print "$ti: starting $p, will finish at $eti\n" if $verbose > 1;
     $building{$eti} = [] unless exists $building{$eti};
     push @{$building{$eti}}, $p;
+    ++$nbuild;
+    ++$nstarted;
+    --$nwait;
   }
 
   $nbuild{$ti} = $nbuild;
   $nwait{$ti}  = $nwait;
-  print "$ti: build $nbuild wait $nwait started $numstarted\n" if $verbose > 1;
+  print "$ti: build $nbuild wait $nwait started $nstarted todo ",scalar @todo,"\n" if $verbose > 1;
 
-  if ($nbuild == 0 && $nwait > 0) {
-    die "deadlocked\n";
+  if ($nbuild == 0 && $nwait > 0 && !@todo) {
+    die "BUG: deadlocked\n";
   }
 
   my $nextti = 0;
