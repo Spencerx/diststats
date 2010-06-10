@@ -857,7 +857,7 @@ sub scheduler_btime
 sub scheduler_needed
 {
   return undef if $nbuildhosts && $nbuild >= $nbuildhosts;
-  @todo = sort {$needed{$b} <=> $needed{$a}} @todo;
+  @todo = sort {$needed{$b} <=> $needed{$a} || $a cmp $b } @todo;
   shift @todo;
 }
 
