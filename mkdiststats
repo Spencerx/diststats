@@ -549,6 +549,7 @@ while ($nwait || $nbuild)
     ++$nbuild;
     ++$nstarted;
     --$nwait;
+    last if $nbuildhosts && $nbuild >= $nbuildhosts;
   }
 
   my $nscheduled = @todo;
@@ -833,34 +834,29 @@ output;
 
 sub scheduler_fifo
 {
-  return undef if $nbuildhosts && $nbuild >= $nbuildhosts;
   pop @todo;
 }
 
 sub scheduler_lifo
 {
-  return undef if $nbuildhosts && $nbuild >= $nbuildhosts;
   shift @todo;
 }
 
 sub scheduler_random
 {
-  return undef if $nbuildhosts && $nbuild >= $nbuildhosts;
   splice(@todo, int(rand(@todo)),1);
 }
 
 sub scheduler_btime
 {
-  return undef if $nbuildhosts && $nbuild >= $nbuildhosts;
-  @todo = sort {$buildtime{$b} <=> $buildtime{$a}} @todo;
-  shift @todo;
+  @todo = sort {$buildtime{$a} <=> $buildtime{$b}} @todo;
+  pop @todo;
 }
 
 sub scheduler_needed
 {
-  return undef if $nbuildhosts && $nbuild >= $nbuildhosts;
-  @todo = sort {$needed{$b} <=> $needed{$a} || $a cmp $b } @todo;
-  shift @todo;
+  @todo = sort {$needed{$a} <=> $needed{$b} || $buildtime{$a} <=> $buildtime{$b}} @todo;
+  pop @todo;
 }
 
 my %scheduler_longest_data;
