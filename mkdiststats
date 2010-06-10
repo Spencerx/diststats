@@ -429,16 +429,21 @@ if ($options{'basepack'} && exists $cycles{$options{'basepack'}}) {
 }
 
 start:
-if ($depsprecomputed && @packs_to_setup) {
-  # check if the package passed is part of a cycle
-  for my $p (keys %pdeps) {
-    if ($p =~ /,/) {
-      my %cycles = map { $_ => $p } split(/,/, $p);
-      @packs_to_setup = grep { $_ = $cycles{$_} if exists $cycles{$_}; 1 } @packs_to_setup;
+if ($depsprecomputed) {
+  if (@packs_to_setup) {
+    # check if the package passed is part of a cycle
+    for my $p (keys %pdeps) {
+      if ($p =~ /,/) {
+	my %cycles = map { $_ => $p } split(/,/, $p);
+	@packs_to_setup = grep { $_ = $cycles{$_} if exists $cycles{$_}; 1 } @packs_to_setup;
+      }
     }
+    @packs_to_setup = unify @packs_to_setup;
+    @todo = @packs_to_setup;
+  } else {
+    my %cycles = map { $_ => 1} split(/,/, join(',', grep { /,/ } keys %pdeps));
+    @todo = grep { !exists $cycles{$_} } keys %pdeps;
   }
-  @packs_to_setup = unify @packs_to_setup;
-  @todo = @packs_to_setup;
 }
 
 # walk the now cycle free graph again
@@ -475,6 +480,7 @@ close FOO;
 
 my %nbuild = ();
 my %nwait = ();
+my %nscheduled = ();
 
 my $cnt = 0;
 
@@ -531,9 +537,11 @@ while ($nwait || $nbuild)
     --$nwait;
   }
 
+  my $nscheduled = @todo;
+  $nscheduled{$ti} = $nscheduled;
   $nbuild{$ti} = $nbuild;
   $nwait{$ti}  = $nwait;
-  print "$ti: build $nbuild wait $nwait started $nstarted todo ",scalar @todo,"\n" if $verbose > 1;
+  print "$ti: building $nbuild, blocked $nwait, started $nstarted, scheduled $nscheduled\n" if $verbose > 1;
 
   if ($nbuild == 0 && $nwait > 0 && !@todo) {
     die "BUG: deadlocked\n";
@@ -552,6 +560,7 @@ while ($nwait || $nbuild)
 }
 $nbuild{$ti} = 0;
 $nwait{$ti}  = 0;
+$nscheduled{$ti}  = 0;
 $maxtime = $ti;
 
 taskdone;
@@ -559,7 +568,7 @@ taskdone;
 open(OUT, '>', "$ddir/simul");
 print OUT "n $numpacks\n";
 while (my ($ti, $nb) = each %nbuild) {
-  printf OUT "t %d %d %d\n", $ti, $nb, $nwait{$ti};
+  printf OUT "t %d %d %d %d\n", $ti, $nb, $nwait{$ti}, $nscheduled{$ti};
 }
 while (my ($p, $ti) = each %finished) {
   printf OUT "f %s %d\n", $p, $ti;
@@ -580,6 +589,7 @@ sub output
       } elsif ($a[0] eq 't') {
 	$nbuild{$a[1]} = $a[2];
 	$nwait{$a[1]} = $a[3];
+	$nscheduled{$a[1]} = $a[4] || 0;
       } elsif ($a[0] eq 'f') {
 	$finished{$a[1]} = $a[2];
       }
@@ -673,6 +683,7 @@ sub output
     height => $opt_height,
     nbuild => \%nbuild,
     nwait => \%nwait,
+    nscheduled => \%nscheduled,
     inttimes => \%inttimes,
     starttime => ($opt_graph_start?$opt_graph_start:0),
     endtime => ($opt_interesting?$finished{$opt_interesting}:0),
