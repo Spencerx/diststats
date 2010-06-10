@@ -577,15 +577,17 @@ $maxtime = $ti;
 
 taskdone;
 
-open(OUT, '>', "$ddir/simul");
-print OUT "n $numpacks\n";
-while (my ($ti, $nb) = each %nbuild) {
-  printf OUT "t %d %d %d %d\n", $ti, $nb, $nwait{$ti}, $nscheduled{$ti};
+if ($opt_scheduler ne 'longest') {
+  open(OUT, '>', "$ddir/simul");
+  print OUT "n $numpacks\n";
+  while (my ($ti, $nb) = each %nbuild) {
+    printf OUT "t %d %d %d %d\n", $ti, $nb, $nwait{$ti}, $nscheduled{$ti};
+  }
+  while (my ($p, $ti) = each %finished) {
+    printf OUT "f %s %d\n", $p, $ti;
+  }
+  close OUT;
 }
-while (my ($p, $ti) = each %finished) {
-  printf OUT "f %s %d\n", $p, $ti;
-}
-close OUT;
 
 sub output
 {
@@ -880,6 +882,7 @@ sub scheduler_longest
     $scheduler_longest_triedread = 1;
     if (!parse()) {
       print STDERR "no previous simulation data, using fifo scheduler\n";
+      $opt_scheduler = 'fifo';
     }
   }
   if (%scheduler_longest_data) {
