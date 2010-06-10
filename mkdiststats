@@ -10,6 +10,8 @@ use Data::Dumper;
 use Getopt::Long;
 Getopt::Long::Configure("no_ignore_case");
 
+use Dfs;
+
 require XML::Parser;
 
 # graph dimensions
@@ -33,6 +35,8 @@ my $opt_nopackalias;
 my $opt_graph_start;
 my @packs_to_setup;
 my $nbuildhosts;
+my $dfs;
+my $depsprecomputed;
 
 my %options;
 
@@ -56,6 +60,7 @@ GetOptions(
   'basepack:s',
   'package:s' => \@packs_to_setup,
   'buildhosts=i' => \$nbuildhosts,
+  'fromscratch',
 ) or exit(1);
 
 $options{'basepack'} = 'autoconf' unless exists $options{'basepack'};
@@ -115,6 +120,21 @@ sub taskdone {
   return unless $opt_timing;
   my $t = time-$starttime;
   print "done in $t secs\n";
+}
+
+sub readdeps() {
+  open(IN, '<', "$ddir/deps") || die "$!";
+  while (<IN>) {
+    chomp;
+    my @a = split(/ /);
+    if ($a[0] eq 'a') {
+      $packalias->{$a[1]} = $a[2];
+    } elsif ($a[0] eq 'b') {
+      $buildtime{$a[1]} = $a[2];
+      $pdeps{$a[1]} = [@a[3 .. $#a]];
+    }
+  }
+  close IN;
 }
 
 my $dist = shift @ARGV;
@@ -181,6 +201,15 @@ my $pdep = new XML::Parser(
   });
 
 my $file = ($srcdir?$srcdir:$ddir)."/_builddepinfo.xml";
+
+if(!$options{'fromscratch'} && -f "$ddir/deps" && -f $file &&  -M "$ddir/deps" < -M $file) {
+  $depsprecomputed = 1;
+  taskstart "reading deps";
+  readdeps;
+  taskdone;
+  goto start;
+}
+
 if (! -e $file) {
   die "_builddepinfo.xml not found" if $srcdir;
   print "retreiving builddepinfo\n";
@@ -255,7 +284,6 @@ for $pack (keys %deps) {
   }
 }
 
-
 taskstart "calculating dependencies";
 # map dependencies to real packages, ignore - deps, filter out self
 for $pack (keys %deps) {
@@ -304,13 +332,10 @@ if ($debug) {
 
 taskstart "computing dependency graph";
 
-use Dfs;
-my $dfs = new Dfs(\%pdeps);
+$dfs = new Dfs(\%pdeps);
 $dfs->startrdfs(@packs_to_setup);
 
 @todo = keys %{$dfs->{'begintime'}};
-
-my $numpacks = @todo;
 
 taskdone;
 
@@ -359,6 +384,27 @@ for my $p (keys %cycledeps) {
   @{$pdeps{$p}} = grep {!exists $cycles{$_}} unify(@{$cycledeps{$p}});
 }
 
+# remove packages involved in cycle and add cycle instead
+sub replacecycles
+{
+  my %cycledone;
+  return grep {
+    if (exists $cycles{$_}) {
+      if (exists $cycledone{$cycles{$_}}) {
+	0;
+      } else {
+	$cycledone{$cycles{$_}} = 1;
+	$_ = $cycles{$_};
+      }
+    } else {
+      1;
+    }
+  } @_;
+}
+@todo = replacecycles @todo;
+@packs_to_setup = replacecycles @packs_to_setup;
+
+
 taskdone;
 
 if ($debug) {
@@ -382,21 +428,17 @@ if ($options{'basepack'} && exists $cycles{$options{'basepack'}}) {
   }
 }
 
-# remove packages involved in cycle from @todo, add cycle instead
-{
-  my %cycledone;
-  @todo = grep {
-    if (exists $cycles{$_}) {
-      if (exists $cycledone{$cycles{$_}}) {
-	0;
-      } else {
-	$cycledone{$cycles{$_}} = 1;
-	$_ = $cycles{$_};
-      }
-    } else {
-      1;
+start:
+if ($depsprecomputed && @packs_to_setup) {
+  # check if the package passed is part of a cycle
+  for my $p (keys %pdeps) {
+    if ($p =~ /,/) {
+      my %cycles = map { $_ => $p } split(/,/, $p);
+      @packs_to_setup = grep { $_ = $cycles{$_} if exists $cycles{$_}; 1 } @packs_to_setup;
     }
-  } @todo;
+  }
+  @packs_to_setup = unify @packs_to_setup;
+  @todo = @packs_to_setup;
 }
 
 # walk the now cycle free graph again
@@ -405,6 +447,12 @@ $dfs->startrdfs(@todo);
 #print Dumper(\@todo);
 #print Dumper($dfs->{'reversedgraph'});
 #print Dumper($dfs->{'reverseorder'});
+
+if ($depsprecomputed) {
+  @todo = keys %{$dfs->{'begintime'}};
+}
+
+my $numpacks = @todo;
 
 my $ti = 0;
 my $nbuild = 0;
@@ -522,18 +570,7 @@ sub output
 {
   if ($opt_justgraph) {
     taskstart "reading deps";
-    open(IN, '<', "$ddir/deps") || die "$!";
-    while (<IN>) {
-      chomp;
-      my @a = split(/ /);
-      if ($a[0] eq 'a') {
-	$packalias->{$a[1]} = $a[2];
-      } elsif ($a[0] eq 'b') {
-	$buildtime{$a[1]} = $a[2];
-	$pdeps{$a[1]} = [@a[3 .. $#a]];
-      }
-    }
-    close IN;
+    readdeps();
     open(IN, '<', "$ddir/simul") || die "$!";
     while (<IN>) {
       chomp;
