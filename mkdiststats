@@ -643,6 +643,12 @@ sub output
       $maxtime = $_ if ($maxtime < $_);
     }
     @done = sort { $finished{$a} <=> $finished{$b} } keys %finished;
+    %needed = map {$_ => 0} @done;
+    for my $p (@done) {
+      for (@{$pdeps{$p}}) {
+	$needed{$_}++;
+      }
+    }
     taskdone;
   }
 
@@ -714,18 +720,20 @@ sub output
   taskstart "creating output";
 
   require RebuildGraph;
+  my %data;
+  for my $t (keys %nbuild) {
+    $data{$t} = [ $nbuild{$t} + $nscheduled{$t} + $nwait{$t}, $nbuild{$t} + $nscheduled{$t}, $nbuild{$t} ];
+  }
   open(IMG, ">$ddir/rebuild.png") || die("$ddir/rebuild.png: $!\n");
   print IMG RebuildGraph::render(
-    dist => $dist,
+    header => sprintf("Rebuildtime %s %s h", $dist, hhmm($maxtime)),
     width => $opt_width,
     height => $opt_height,
-    nbuild => \%nbuild,
-    nwait => \%nwait,
-    #nleafs => \%nleafs,
-    nscheduled => \%nscheduled,
+    data => \%data,
     inttimes => \%inttimes,
     starttime => ($opt_graph_start?$opt_graph_start:0),
     endtime => ($opt_interesting?$finished{$opt_interesting}:0),
+    scalecol => 1,
   );
   close IMG;
 
