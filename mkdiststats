@@ -533,7 +533,9 @@ if ($opt_scheduler ne 'longest') {
     printf OUT "t %d %d %d %d\n", $ti, $bdata->{$ti}->[0], $bdata->{$ti}->[1], $bdata->{$ti}->[2];
   }
   while (my ($p, $ti) = each %finished) {
-    printf OUT "f %s %d\n", $p, $ti;
+    printf OUT "f %s %d", $p, $ti;
+    printf OUT " %d", $tfinished->{$p} if $tfinished;
+    print OUT "\n";
   }
   printf OUT "s %s\n", $opt_scheduler;
   printf OUT "h %d\n", $opt_buildhosts;
@@ -663,6 +665,10 @@ sub output
 	$bdata->{$a[1]} = [ @a[2 .. 4] ];
       } elsif ($a[0] eq 'f') {
 	$finished{$a[1]} = $a[2];
+	if (@a == 4) {
+	  $tfinished = {} unless $tfinished;
+	  $tfinished->{$a[1]} = $a[3];
+	}
       } elsif ($a[0] eq 's') {
 	$opt_scheduler = $a[1];
       } elsif ($a[0] eq 'h') {
@@ -673,8 +679,11 @@ sub output
     for (keys %$bdata) {
       $maxtime = $_ if ($maxtime < $_);
     }
-    # XXX: fix for tfinished
-    @done = sort { $finished{$a} <=> $finished{$b} } keys %finished;
+    if ($tfinished) {
+      @done = sort { $tfinished->{$a} <=> $tfinished->{$b} } keys %$tfinished;
+    } else {
+      @done = sort { $finished{$a} <=> $finished{$b} } keys %finished;
+    }
     %needed = map {$_ => 0} @done;
     for my $p (@done) {
       for (@{$pdeps{$p}}) {
