@@ -106,7 +106,6 @@ my %buildtime;
 my %pdeps;
 my @todo;
 my @basesubpacks;
-my @done;
 my $maxtime = 0;
 
 my $packalias = {};
@@ -510,7 +509,22 @@ EOF
 
 my $numpacks = @todo;
 my %finished;
-my $bdata = run(finished => \%finished, nbuildhosts => $opt_buildhosts);
+my $tfinished;
+my @done;
+if ($opt_scheduler ne 'fifo' || $opt_buildhosts) {
+  $tfinished = {};
+  my %ro = %{$dfs->{'reverseorder'}};
+  run(finished => $tfinished, scheduler => 'fifo', todo => \@todo);
+  $dfs->{'reverseorder'} = { %ro };
+  @done = sort { $tfinished->{$a} <=> $tfinished->{$b} } @todo;
+}
+my $bdata = run(
+    finished => \%finished,
+    nbuildhosts => $opt_buildhosts,
+    scheduler => $opt_scheduler,
+    todo => \@todo
+  );
+@done = sort { $finished{$a} <=> $finished{$b} } @todo unless @done;
 
 if ($opt_scheduler ne 'longest') {
   open(OUT, '>', "$ddir/simul");
@@ -532,26 +546,32 @@ exit 0;
 
 ##########
 
+# XXX
+my @scheduled;
 sub run
 {
   my %args = @_;
   my $finished = $args{'finished'} || undef;
   my $nbuildhosts = $args{'nbuildhosts'} || undef;
+  my $scheduler = $scheduler{$args{'scheduler'}||'fifo'};
+  my $todo = $args{'todo'} || [];
 
   my $ti = 0;
   my $nbuild = 0;
-
-  my $scheduler = $scheduler{$opt_scheduler};
 
   my $bdata = {};
 #my %nleafs = ();
 
   my $cnt = 0;
 
-  my $nwait = @todo;
-  for my $p (splice @todo) {
+  my $nwait = @$todo;
+
+  die "BUG: nothing to do\n" unless $nwait;
+
+  @scheduled = ();
+  for my $p (@$todo) {
     if($dfs->{'reverseorder'}->{$p}==0) {
-      push @todo, $p;
+      push @scheduled, $p;
     }
   }
 
@@ -569,11 +589,10 @@ sub run
       $nbuild -= $nfinish;
       for my $p (@{$building{$ti}}) {
 	print "$ti: finished $p\n" if $verbose > 1;
-	push @done, $p;
 	$finished->{$p} = $ti if $finished;
 	for my $dep (@{$dfs->{'reversedgraph'}->{$p}}) {
 	  $dfs->{'reverseorder'}->{$dep}--;
-	  push @todo, $dep if $dfs->{'reverseorder'}->{$dep} == 0;
+	  push @scheduled, $dep if $dfs->{'reverseorder'}->{$dep} == 0;
 	}
 	delete $dfs->{'reverseorder'}->{$p};
       }
@@ -583,6 +602,7 @@ sub run
     die "BUG: nwait < 0\n" if $nwait < 0;
     my $nstarted = 0;
     #my $nleafs = 0;
+    #XXX: sort once then pop
     while (my $p = &$scheduler()) {
       my $eti = 0;
       $eti = $buildtime{$p};
@@ -596,14 +616,14 @@ sub run
 #    ++$nleafs if $needed{$p} == 0;
       last if $nbuildhosts && $nbuild >= $nbuildhosts;
     }
-    #$nleafs = grep { $needed{$_} == 0 } @todo;
+    #$nleafs = grep { $needed{$_} == 0 } @scheduled;
 
-    my $nscheduled = @todo;
+    my $nscheduled = @scheduled;
     $bdata->{$ti} = [$nbuild, $nwait, $nscheduled];
     #$nleafs{$ti}  = $nleafs;
     print "$ti: building $nbuild, blocked $nwait, started $nstarted, scheduled $nscheduled\n" if $verbose > 1;
 
-    if ($nbuild == 0 && $nwait > 0 && !@todo) {
+    if ($nbuild == 0 && $nwait > 0 && !@scheduled) {
       die "BUG: deadlocked\n";
     }
 
@@ -653,6 +673,7 @@ sub output
     for (keys %$bdata) {
       $maxtime = $_ if ($maxtime < $_);
     }
+    # XXX: fix for tfinished
     @done = sort { $finished{$a} <=> $finished{$b} } keys %finished;
     %needed = map {$_ => 0} @done;
     for my $p (@done) {
@@ -698,7 +719,11 @@ sub output
 	  $l = $dep;
 	  next;
 	}
-	$l = $dep if $finished{$l} < $finished{$dep};
+	if ($tfinished) {
+	  $l = $dep if $tfinished->{$l} < $tfinished->{$dep};
+	} else {
+	  $l = $dep if $finished{$l} < $finished{$dep};
+	}
       }
       $p = $l;
     }
@@ -833,6 +858,9 @@ sub write_html
 	$ltab .= "<td>&nbsp;$qn:</td>\n";
 	$h=hhmm($buildtime{$q});
 	my $hf=hhmm($finished{$q});
+	if ($tfinished) {
+	  $hf .= "&nbsp;<br>".hhmm($tfinished->{$q});
+	}
 	$ltab .= "<td align=right>&nbsp;$h&nbsp;<br>&nbsp;$hf&nbsp;</td>\n";
       } else {
 	$ltab .= "<td>&nbsp;</td><td>&nbsp;</td>\n";
@@ -877,40 +905,40 @@ sub write_html
   taskdone;
 }
 
-sub scheduler_fifo
+sub scheduler_fifo($)
 {
-  pop @todo;
+  pop @scheduled;
 }
 
 sub scheduler_lifo
 {
-  shift @todo;
+  shift @scheduled;
 }
 
 sub scheduler_random
 {
-  splice(@todo, int(rand(@todo)),1);
+  splice(@scheduled, int(rand(@scheduled)),1);
 }
 
 sub scheduler_btime
 {
-  @todo = sort {$buildtime{$a} <=> $buildtime{$b}} @todo;
-  pop @todo;
+  @scheduled = sort {$buildtime{$a} <=> $buildtime{$b}} @scheduled;
+  pop @scheduled;
 }
 
 sub scheduler_needed
 {
-  @todo = sort {$needed{$a} <=> $needed{$b}} @todo;
-  pop @todo;
+  @scheduled = sort {$needed{$a} <=> $needed{$b}} @scheduled;
+  pop @scheduled;
 }
 
 sub scheduler_neededb
 {
-  @todo = sort {$needed{$a} <=> $needed{$b} || $buildtime{$a} <=> $buildtime{$b}} @todo;
-  #@todo = sort {$needed{$a} <=> $needed{$b} || @{$pdeps{$a}} <=> @{$pdeps{$b}} } @todo;
+  @scheduled = sort {$needed{$a} <=> $needed{$b} || $buildtime{$a} <=> $buildtime{$b}} @scheduled;
+  #@scheduled = sort {$needed{$a} <=> $needed{$b} || @{$pdeps{$a}} <=> @{$pdeps{$b}} } @scheduled;
   # doesn't make sense. due to stable sort this is equivalent to scheduler_needed
-  #@todo = sort {$needed{$a} <=> $needed{$b} || $ready{$b} <=> $ready{$a}} @todo;
-  pop @todo;
+  #@scheduled = sort {$needed{$a} <=> $needed{$b} || $ready{$b} <=> $ready{$a}} @scheduled;
+  pop @scheduled;
 }
 
 my %scheduler_longest_data;
@@ -938,7 +966,7 @@ sub scheduler_longest
     }
   }
   if (%scheduler_longest_data) {
-    @todo = sort {$scheduler_longest_data{$a} <=> $scheduler_longest_data{$b}} @todo;
+    @scheduled = sort {$scheduler_longest_data{$a} <=> $scheduler_longest_data{$b}} @scheduled;
   }
-  pop @todo;
+  pop @scheduled;
 }
