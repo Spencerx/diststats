@@ -14,6 +14,9 @@ use Dfs;
 
 require XML::Parser;
 
+sub output;
+sub run;
+
 # graph dimensions
 my $opt_width = 1000;
 my $opt_height = 450;
@@ -34,7 +37,7 @@ my $outfmt = 'html';
 my $opt_nopackalias;
 my $opt_graph_start;
 my @packs_to_setup;
-my $nbuildhosts;
+my $opt_buildhosts;
 my $dfs;
 my $depsprecomputed;
 my $opt_scheduler = 'fifo';
@@ -60,7 +63,7 @@ GetOptions(
   'numlongest=s',
   'basepack:s',
   'package:s' => \@packs_to_setup,
-  'buildhosts=i' => \$nbuildhosts,
+  'buildhosts=i' => \$opt_buildhosts,
   'fromscratch',
   'scheduler=s' => \$opt_scheduler,
 ) or exit(1);
@@ -87,14 +90,13 @@ my %outputfunction = (
 
 die "invalid output format\n" unless exists $outputfunction{$outfmt};
 
-if (!$nbuildhosts && $opt_scheduler ne "fifo") {
+if (!$opt_buildhosts && $opt_scheduler ne "fifo") {
   print STDERR "forcing fifo scheduler\n";
   $opt_scheduler = "fifo";
 }
 my @scheduler = (qw/fifo lifo random btime needed neededb longest/);
 my %scheduler = map { $_ => \&{'scheduler_'.$_} } @scheduler;
 die "invalid scheduler $opt_scheduler\n" unless exists $scheduler{$opt_scheduler};
-my $scheduler = $scheduler{$opt_scheduler};
 
 my %subpacks;
 my %deps;
@@ -163,7 +165,6 @@ if (!$ddir) {
 die "$ddir must be a directory\n" unless -d $ddir;
 
 if ($opt_justgraph) {
-  sub output;
   output;
   exit 0;
 }
@@ -491,11 +492,6 @@ if ($debug) {
   close OUT;
 }
 
-my $numpacks = @todo;
-
-my $ti = 0;
-my $nbuild = 0;
-
 if (!$depsprecomputed) {
   open(FOO, '>', "$ddir/deps");
   print FOO <<EOF
@@ -512,111 +508,122 @@ EOF
   close FOO;
 }
 
-#%deppath = ();
-
-my %nbuild = ();
-my %nwait = ();
-my %nscheduled = ();
-#my %nleafs = ();
-
-my $cnt = 0;
-
-my $nwait = @todo;
-for my $p (splice @todo) {
-    if($dfs->{'reverseorder'}->{$p}==0) {
-	push @todo, $p;
-    }
-}
-
-taskstart "Starting simulation with $nwait packages";
-
-my %building;
+my $numpacks = @todo;
 my %finished;
-while ($nwait || $nbuild)
-{
-  ++$cnt;
-  last if $maxiter && $cnt > $maxiter;
-
-  if ($ti) {
-    die "BUG: nothing finishes at $ti!\n" unless exists $building{$ti};
-    my $nfinish = @{$building{$ti}};
-    $nbuild -= $nfinish;
-    for my $p (@{$building{$ti}}) {
-      print "$ti: finished $p\n" if $verbose > 1;
-      push @done, $p;
-      $finished{$p} = $ti;
-      for my $dep (@{$dfs->{'reversedgraph'}->{$p}}) {
-	$dfs->{'reverseorder'}->{$dep}--;
-	push @todo, $dep if $dfs->{'reverseorder'}->{$dep} == 0;
-      }
-      if (0) { # adjust needed
-	for my $dep (@{$pdeps{$p}}) {
-	  --$needed{$dep};
-	  die "BUG: needed $dep < 0\n" if $needed{$dep} < 0;
-	}
-      }
-      delete $dfs->{'reverseorder'}->{$p};
-    }
-    delete $building{$ti};
-  }
-
-  die "BUG: nwait < 0\n" if $nwait < 0;
-  my $nstarted = 0;
-  #my $nleafs = 0;
-  while (my $p = &$scheduler()) {
-    my $eti = 0;
-    $eti = $buildtime{$p};
-    $eti += $ti;
-    print "$ti: starting $p, will finish at $eti\n" if $verbose > 1;
-    $building{$eti} = [] unless exists $building{$eti};
-    push @{$building{$eti}}, $p;
-    ++$nbuild;
-    ++$nstarted;
-    --$nwait;
-#    ++$nleafs if $needed{$p} == 0;
-    last if $nbuildhosts && $nbuild >= $nbuildhosts;
-  }
-  #$nleafs = grep { $needed{$_} == 0 } @todo;
-
-  my $nscheduled = @todo;
-  $nscheduled{$ti} = $nscheduled;
-  $nbuild{$ti} = $nbuild;
-  $nwait{$ti}  = $nwait;
-  #$nleafs{$ti}  = $nleafs;
-  print "$ti: building $nbuild, blocked $nwait, started $nstarted, scheduled $nscheduled\n" if $verbose > 1;
-
-  if ($nbuild == 0 && $nwait > 0 && !@todo) {
-    die "BUG: deadlocked\n";
-  }
-
-  my $nextti = 0;
-  for my $t (keys %building) {
-    if (!$nextti) {
-      $nextti = $t;
-      next;
-    }
-    $nextti = $t if $t < $nextti;
-  }
-  last unless $nextti;
-  $ti = $nextti;
-}
-$nbuild{$ti} = 0;
-$nwait{$ti}  = 0;
-$nscheduled{$ti}  = 0;
-$maxtime = $ti;
-
-taskdone;
+my $bdata = run(finished => \%finished, nbuildhosts => $opt_buildhosts);
 
 if ($opt_scheduler ne 'longest') {
   open(OUT, '>', "$ddir/simul");
   print OUT "n $numpacks\n";
-  while (my ($ti, $nb) = each %nbuild) {
-    printf OUT "t %d %d %d %d\n", $ti, $nb, $nwait{$ti}, $nscheduled{$ti};
+  for my $ti (keys %$bdata) {
+    printf OUT "t %d %d %d %d\n", $ti, $bdata->{$ti}->[0], $bdata->{$ti}->[1], $bdata->{$ti}->[2];
   }
   while (my ($p, $ti) = each %finished) {
     printf OUT "f %s %d\n", $p, $ti;
   }
   close OUT;
+}
+
+output;
+
+exit 0;
+
+##########
+
+sub run
+{
+  my %args = @_;
+  my $finished = $args{'finished'} || undef;
+  my $nbuildhosts = $args{'nbuildhosts'} || undef;
+
+  my $ti = 0;
+  my $nbuild = 0;
+
+  my $scheduler = $scheduler{$opt_scheduler};
+
+  my $bdata = {};
+#my %nleafs = ();
+
+  my $cnt = 0;
+
+  my $nwait = @todo;
+  for my $p (splice @todo) {
+    if($dfs->{'reverseorder'}->{$p}==0) {
+      push @todo, $p;
+    }
+  }
+
+  taskstart "Starting simulation with $nwait packages";
+
+  my %building;
+  while ($nwait || $nbuild)
+  {
+    ++$cnt;
+    last if $maxiter && $cnt > $maxiter;
+
+    if ($ti) {
+      die "BUG: nothing finishes at $ti!\n" unless exists $building{$ti};
+      my $nfinish = @{$building{$ti}};
+      $nbuild -= $nfinish;
+      for my $p (@{$building{$ti}}) {
+	print "$ti: finished $p\n" if $verbose > 1;
+	push @done, $p;
+	$finished->{$p} = $ti if $finished;
+	for my $dep (@{$dfs->{'reversedgraph'}->{$p}}) {
+	  $dfs->{'reverseorder'}->{$dep}--;
+	  push @todo, $dep if $dfs->{'reverseorder'}->{$dep} == 0;
+	}
+	delete $dfs->{'reverseorder'}->{$p};
+      }
+      delete $building{$ti};
+    }
+
+    die "BUG: nwait < 0\n" if $nwait < 0;
+    my $nstarted = 0;
+    #my $nleafs = 0;
+    while (my $p = &$scheduler()) {
+      my $eti = 0;
+      $eti = $buildtime{$p};
+      $eti += $ti;
+      print "$ti: starting $p, will finish at $eti\n" if $verbose > 1;
+      $building{$eti} = [] unless exists $building{$eti};
+      push @{$building{$eti}}, $p;
+      ++$nbuild;
+      ++$nstarted;
+      --$nwait;
+#    ++$nleafs if $needed{$p} == 0;
+      last if $nbuildhosts && $nbuild >= $nbuildhosts;
+    }
+    #$nleafs = grep { $needed{$_} == 0 } @todo;
+
+    my $nscheduled = @todo;
+    $bdata->{$ti} = [$nbuild, $nwait, $nscheduled];
+    #$nleafs{$ti}  = $nleafs;
+    print "$ti: building $nbuild, blocked $nwait, started $nstarted, scheduled $nscheduled\n" if $verbose > 1;
+
+    if ($nbuild == 0 && $nwait > 0 && !@todo) {
+      die "BUG: deadlocked\n";
+    }
+
+    my $nextti = 0;
+    for my $t (keys %building) {
+      if (!$nextti) {
+	$nextti = $t;
+	next;
+      }
+      $nextti = $t if $t < $nextti;
+    }
+    last unless $nextti;
+    $ti = $nextti;
+  }
+  $bdata->{$ti} = [0, 0, 0];
+  $maxtime = $ti;
+
+  die "BUG: didn't build all packages! $nwait left.\n" if $nwait;
+
+  taskdone;
+
+  return $bdata;
 }
 
 sub output
@@ -631,15 +638,13 @@ sub output
       if ($a[0] eq 'n') {
 	$numpacks = $a[1];
       } elsif ($a[0] eq 't') {
-	$nbuild{$a[1]} = $a[2];
-	$nwait{$a[1]} = $a[3];
-	$nscheduled{$a[1]} = $a[4] || 0;
+	$bdata->{$a[1]} = [ @a[2 .. 4] ];
       } elsif ($a[0] eq 'f') {
 	$finished{$a[1]} = $a[2];
       }
     }
     close IN;
-    for (keys %nbuild) {
+    for (keys %$bdata) {
       $maxtime = $_ if ($maxtime < $_);
     }
     @done = sort { $finished{$a} <=> $finished{$b} } keys %finished;
@@ -721,8 +726,8 @@ sub output
 
   require RebuildGraph;
   my %data;
-  for my $t (keys %nbuild) {
-    $data{$t} = [ $nbuild{$t} + $nscheduled{$t} + $nwait{$t}, $nbuild{$t} + $nscheduled{$t}, $nbuild{$t} ];
+  for my $t (keys %$bdata) {
+    $data{$t} = [ $bdata->{$t}->[0] + $bdata->{$t}->[1] + $bdata->{$t}->[2], $bdata->{$t}->[0] + $bdata->{$t}->[2], $bdata->{$t}->[0] ];
   }
   open(IMG, ">$ddir/rebuild.png") || die("$ddir/rebuild.png: $!\n");
   print IMG RebuildGraph::render(
@@ -798,8 +803,8 @@ sub write_html
   my $h=hhmm($maxtime);
   $in =~ s/\<REBUILDTIME\>/$h/sg;
   $in =~ s/\<NUMPACKS\>/$numpacks/sg;
-  if ($nbuildhosts) {
-    $in =~ s/\<NUMHOSTS\>/$nbuildhosts/sg;
+  if ($opt_buildhosts) {
+    $in =~ s/\<NUMHOSTS\>/$opt_buildhosts/sg;
   } else {
     $in =~ s/\<NUMHOSTS\>/infinite/sg;
   }
@@ -866,8 +871,6 @@ sub write_html
   taskdone;
 }
 
-output;
-
 sub scheduler_fifo
 {
   pop @todo;
@@ -908,7 +911,6 @@ my %scheduler_longest_data;
 my $scheduler_longest_triedread;
 sub scheduler_longest
 {
-  return undef if $nbuildhosts && $nbuild >= $nbuildhosts;
   local *parse = sub {
     open(IN, '<', "$ddir/simul") || return undef;
     while (<IN>) {
