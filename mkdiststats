@@ -66,6 +66,7 @@ GetOptions(
   'buildhosts=i' => \$opt_buildhosts,
   'fromscratch',
   'scheduler=s' => \$opt_scheduler,
+  'animate-buildhosts',
 ) or exit(1);
 
 $options{'basepack'} = 'autoconf' unless exists $options{'basepack'};
@@ -105,7 +106,7 @@ my %failed;
 my %buildtime;
 my %pdeps;
 my @todo;
-my @basesubpacks;
+# XXX global var
 my $maxtime = 0;
 
 my $packalias = {};
@@ -513,12 +514,28 @@ my $tfinished;
 my @done;
 if ($opt_scheduler ne 'fifo' || $opt_buildhosts) {
   $tfinished = {};
-  my %ro = %{$dfs->{'reverseorder'}};
+  my %ro = %{$dfs->{'reverseorder'}}; # XXX: sucks
   run(finished => $tfinished, scheduler => 'fifo', todo => \@todo);
   $dfs->{'reverseorder'} = { %ro };
   @done = sort { $tfinished->{$a} <=> $tfinished->{$b} } @todo;
 }
-my $bdata = run(
+my $bdata;
+if ($opt_buildhosts && $opt_buildhosts > 0 && $options{'animate-buildhosts'}) {
+  my %ro = %{$dfs->{'reverseorder'}}; # XXX: sucks
+  for my $n (1 .. $opt_buildhosts) {
+    $bdata = run(
+      nbuildhosts => $n,
+      scheduler => $opt_scheduler,
+      todo => \@todo
+    );
+    render(sprintf("$ddir/rebuild%03d.png", $n),
+      undef,
+      sprintf("Rebuildtime %s %s h, %d hosts", $dist, hhmm($maxtime), $n)
+      );
+    $dfs->{'reverseorder'} = { %ro };
+  }
+}
+$bdata = run(
     finished => \%finished,
     nbuildhosts => $opt_buildhosts,
     scheduler => $opt_scheduler,
@@ -577,7 +594,7 @@ sub run
     }
   }
 
-  taskstart "Starting simulation with $nwait packages";
+  taskstart sprintf("Starting simulation with %d packages on %s hosts", $nwait, ($nbuildhosts||'infinite'));
 
   my %building;
   while ($nwait || $nbuild)
@@ -764,7 +781,7 @@ sub output
 
   taskstart "creating output";
 
-  render("$ddir/rebuild.png", \%inttimes, $maxtime);
+  render("$ddir/rebuild.png", \%inttimes);
 
   my @longestbuildtime = sort {$buildtime{$b} <=> $buildtime{$a}} grep { ! /,/; } keys %buildtime;
   @longestbuildtime = splice(@longestbuildtime, 0, 20);
@@ -905,17 +922,20 @@ sub render
 {
   my $file = shift;
   my $inttimes = shift;
-  my $maxtime = shift;
+  my $header = shift;
   require RebuildGraph;
   my %data;
+  my $maxtime = 0;
   for my $t (keys %$bdata) {
     $data{$t} = [ $bdata->{$t}->[0] + $bdata->{$t}->[1] + $bdata->{$t}->[2],
     $bdata->{$t}->[0] + $bdata->{$t}->[2],
     $bdata->{$t}->[0] ];
+    $maxtime = $t if $maxtime < $t;
   }
+  $header = sprintf("Rebuildtime %s %s h", $dist, hhmm($maxtime)) unless $header;
   open(IMG, '>', $file) || die("$file: $!\n");
   print IMG RebuildGraph::render(
-    header => sprintf("Rebuildtime %s %s h", $dist, hhmm($maxtime)),
+    header => $header,
     width => $opt_width,
     height => $opt_height,
     data => \%data,
