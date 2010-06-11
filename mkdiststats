@@ -521,6 +521,8 @@ if ($opt_scheduler ne 'longest') {
   while (my ($p, $ti) = each %finished) {
     printf OUT "f %s %d\n", $p, $ti;
   }
+  printf OUT "s %s\n", $opt_scheduler;
+  printf OUT "h %d\n", $opt_buildhosts;
   close OUT;
 }
 
@@ -641,6 +643,10 @@ sub output
 	$bdata->{$a[1]} = [ @a[2 .. 4] ];
       } elsif ($a[0] eq 'f') {
 	$finished{$a[1]} = $a[2];
+      } elsif ($a[0] eq 's') {
+	$opt_scheduler = $a[1];
+      } elsif ($a[0] eq 'h') {
+	$opt_buildhosts = $a[1];
       }
     }
     close IN;
