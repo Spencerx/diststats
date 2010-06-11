@@ -17,6 +17,8 @@ require XML::Parser;
 sub output;
 sub run;
 
+my $osc = "osc";
+
 # graph dimensions
 my $opt_width = 1000;
 my $opt_height = 450;
@@ -225,7 +227,7 @@ if(!$options{'fromscratch'} && -f "$ddir/deps" && -f $file &&  -M "$ddir/deps" <
 if (! -e $file) {
   die "_builddepinfo.xml not found" if $srcdir;
   print "retreiving builddepinfo\n";
-  system("osc api '/build/$dist/_builddepinfo' > $file");
+  system("$osc api '/build/$dist/_builddepinfo' > $file");
 }
 taskstart "parsing build deps";
 $pdep->parsefile($file, ProtocolEncoding => 'UTF-8');
@@ -269,7 +271,10 @@ $file = ($srcdir?$srcdir:$ddir)."/_jobhistory.xml";
 if (! -e $file) {
   die "_jobhistory.xml not found" if $srcdir;
   print "retreiving jobhistory\n";
-  system("osc api '/build/$dist/_jobhistory?code=lastfailures' > $file");
+  #system("$osc api '/build/$dist/_jobhistory?code=lastfailures' > $file");
+  my $n = keys %deps;
+  $n *= 3;
+  system("$osc api '/build/$dist/_jobhistory?limit=$n&code=succeeded&code=unchanged' > $file");
 }
 my $p1 = new XML::Parser(
   Handlers => {
