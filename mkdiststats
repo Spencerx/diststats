@@ -764,23 +764,7 @@ sub output
 
   taskstart "creating output";
 
-  require RebuildGraph;
-  my %data;
-  for my $t (keys %$bdata) {
-    $data{$t} = [ $bdata->{$t}->[0] + $bdata->{$t}->[1] + $bdata->{$t}->[2], $bdata->{$t}->[0] + $bdata->{$t}->[2], $bdata->{$t}->[0] ];
-  }
-  open(IMG, ">$ddir/rebuild.png") || die("$ddir/rebuild.png: $!\n");
-  print IMG RebuildGraph::render(
-    header => sprintf("Rebuildtime %s %s h", $dist, hhmm($maxtime)),
-    width => $opt_width,
-    height => $opt_height,
-    data => \%data,
-    inttimes => \%inttimes,
-    starttime => ($opt_graph_start?$opt_graph_start:0),
-    endtime => ($opt_interesting?$finished{$opt_interesting}:0),
-    scalecol => 1,
-  );
-  close IMG;
+  render("$ddir/rebuild.png", \%inttimes, $maxtime);
 
   my @longestbuildtime = sort {$buildtime{$b} <=> $buildtime{$a}} grep { ! /,/; } keys %buildtime;
   @longestbuildtime = splice(@longestbuildtime, 0, 20);
@@ -823,7 +807,10 @@ sub write_xml
   print OUT "</longestpath>\n";
   print OUT "<timings>\n";
   for my $p (keys %seen) {
-    printf OUT "<package name=\"%s\" buildtime=\"%d\" finished=\"%d\"/>\n", ($packalias->{$p}||$p), $buildtime{$p}, $finished{$p};
+    my $s = sprintf "<package name=\"%s\" buildtime=\"%d\" finished=\"%d\"", ($packalias->{$p}||$p), $buildtime{$p}, $finished{$p};
+    $s .= sprintf " tfinished=\"%s\"", $tfinished->{$p} if $tfinished;
+    $s .= "/>\n";
+    print OUT $s;
   }
   print OUT "</timings>\n";
   print OUT "</diststats>\n";
@@ -912,6 +899,32 @@ sub write_html
   close IN;
 
   taskdone;
+}
+
+sub render
+{
+  my $file = shift;
+  my $inttimes = shift;
+  my $maxtime = shift;
+  require RebuildGraph;
+  my %data;
+  for my $t (keys %$bdata) {
+    $data{$t} = [ $bdata->{$t}->[0] + $bdata->{$t}->[1] + $bdata->{$t}->[2],
+    $bdata->{$t}->[0] + $bdata->{$t}->[2],
+    $bdata->{$t}->[0] ];
+  }
+  open(IMG, '>', $file) || die("$file: $!\n");
+  print IMG RebuildGraph::render(
+    header => sprintf("Rebuildtime %s %s h", $dist, hhmm($maxtime)),
+    width => $opt_width,
+    height => $opt_height,
+    data => \%data,
+    inttimes => $inttimes,
+    starttime => ($opt_graph_start?$opt_graph_start:0),
+    endtime => ($opt_interesting?$finished{$opt_interesting}:0),
+    scalecol => 1,
+  );
+  close IMG;
 }
 
 sub scheduler_fifo($)
