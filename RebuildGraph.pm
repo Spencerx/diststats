@@ -22,7 +22,7 @@ sub render {
   my $inttimes = $params{'inttimes'} || {};
   my $starttime = $params{'starttime'} || 0;
   my $endtime = $params{'endtime'} || 0;
-  my $colors = $params{'colors'} || [ qw/0000ff 3f71ff 6ec8ff ff0000/];
+  my $colors = $params{'colors'} || [ qw/0000ff 3f71ff 6ec8ff 00ff00 ff0000/];
 
   my $maxval = 0;
   my $maxtime = 0;
@@ -62,6 +62,7 @@ sub render {
       push @colors, $image->colorAllocate(hex $1, hex $2, hex $3);
     }
   }
+  my $ncolors = @colors;
   my $gray    = $image->colorAllocate (128, 128, 128);
 #my $grayd   = $image->colorAllocate (64, 64, 64);
   my $grayd = $black;
@@ -93,7 +94,7 @@ sub render {
     }
     if ($ox) {
       for my $i (0 .. $#oy) {
-	$image->filledRectangle($ox, $oy[$i], $x, $iyoff + $ih - 1, $colors[$i%$#colors]);
+	$image->filledRectangle($ox, $oy[$i], $x, $iyoff + $ih - 1, $colors[$i%$ncolors]);
       }
     }
     $ox = $x;
