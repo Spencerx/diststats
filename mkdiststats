@@ -40,7 +40,7 @@ my $outfmt = 'html';
 my $opt_nopackalias;
 my $opt_graph_start;
 my @packs_to_setup;
-my $opt_buildhosts;
+my $opt_buildhosts = 0;
 my $dfs;
 my $depsprecomputed;
 my $opt_scheduler = 'fifo';
