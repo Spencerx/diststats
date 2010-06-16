@@ -7,6 +7,7 @@ use Time::Local 'timelocal_nocheck';
 
 use Data::Dumper;
 
+use Pod::Usage;
 use Getopt::Long;
 Getopt::Long::Configure("no_ignore_case");
 
@@ -69,7 +70,10 @@ GetOptions(
   'fromscratch',
   'scheduler=s' => \$opt_scheduler,
   'animate-buildhosts',
-) or exit(1);
+  'help|h',
+  'man',
+) or pod2usage(1);
+pod2usage(-exitstatus => 0, -verbose => 2) if $options{'man'};
 
 $options{'basepack'} = 'autoconf' unless exists $options{'basepack'};
 
@@ -153,7 +157,7 @@ sub readdeps() {
 }
 
 my $dist = shift @ARGV;
-die("No dist specified!\n") unless $dist ne '';
+pod2usage("No dist specified!\n") unless $dist;
 
 my $templdir = ".";
 if (!$ddir) {
@@ -1017,3 +1021,52 @@ sub scheduler_longest
   }
   pop @scheduled;
 }
+
+
+__END__
+
+=head1 NAME
+
+mkdiststats - calculate distribution rebuild times
+
+=head1 SYNOPSIS
+
+mkdiststats [options] <project/repo/arch>
+
+  Options:
+  --outfmt=FMT      output format (html, plain, xml)
+  --width=X         width of the output graph
+  --height=Y        height of the output graph
+  --destdir=DIR     where to output files
+  --srcdir=DIR      where to build info from
+  --buildhosts=N    number of build hosts for simulation (0 == infinite)
+  --scheduler=S     scheduler algorithm if number of build hosts is limited
+  --numlongest=N    number of longest paths to calculate
+  --verbose         more verbose output
+  --help            brief help message
+  --man             full documentation
+
+=head1 OPTIONS
+
+=over 8
+
+=item B<-help>
+
+Print a brief help message and exits.
+
+=item B<-man>
+
+Prints the manual page and exits.
+
+=back
+
+=head1 DESCRIPTION
+
+B<mkdiststats> uses build dependency and the build history
+information of a project in the openSUSE build service to roughly
+calculate the time needed to rebuild the project. This information
+can be used to find out which packages take the longest and where
+the bottlenecks are.
+
+=cut
+
