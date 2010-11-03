@@ -4,7 +4,7 @@ package Dfs;
 
 use strict;
 
-our $warnings = 1;
+our $warnings = 0;
 
 sub new {
     my $class = shift;
@@ -31,6 +31,10 @@ sub new {
 	reversedgraph => {},
 	# how many edges end here
 	reverseorder => {},
+
+	cycles => {},
+	cyclepkgs => {},
+	numcycles => 0,
     };
     $self->{'nodes'}=shift;
     bless ($self, $class);
@@ -124,6 +128,36 @@ sub parents {
     return @l;
 }
 
+sub addcycle($$)
+{
+    my $self = shift;
+    my $pkgs = shift;
+    my $cycles = $self->{'cycles'};
+    my $cyclepkgs = $self->{'cyclepkgs'};
+    my $cid; # cycle id
+    for my $p (@$pkgs) {
+	if (defined $cyclepkgs->{$p}) {
+	    my $id = $cyclepkgs->{$p};
+	    if ($cid && $cid != $id) {
+		warn "$p: folding cycle cycle $id (",join(',', @{$cycles->{$id}}),") into $cid (",join(',', @{$cycles->{$cid}}),")\n" if $warnings;
+		push @$pkgs, @{$cycles->{$id}};
+		for (@{$cycles->{$id}}) {
+		    $cyclepkgs->{$_} = $cid;
+		}
+		delete $cycles->{$id};
+	    } else {
+		$cid = $id;
+	    }
+	}
+    }
+    $cid = $self->{'numcycles'}++ unless defined $cid;
+    for (@$pkgs) {
+	die "$_ $cyclepkgs->{$_} $cid\n" if exists $cyclepkgs->{$_} && $cyclepkgs->{$_} != $cid; # can't happen
+	$cyclepkgs->{$_} = $cid;
+    }
+
+    push @{$cycles->{$cid}}, @$pkgs;
+}
 sub rdfsvisit
 {
     my ($self, $k) = @_;
@@ -135,10 +169,7 @@ sub rdfsvisit
     $self->{'reverseorder'}->{$k}=0 if !exists $self->{'reverseorder'}->{$k};
     for my $p (@{$self->{'nodes'}->{$k}})
     {
-	if($p eq $k)
-	{
-	    print STDERR "$k requires itself\n";
-	}
+	warn "$k requires itself\n" if $warnings && ($p eq $k);
 
 	# unknown dep, should not happen here
 	next unless exists $self->{'visited'}->{$p};
@@ -154,7 +185,8 @@ sub rdfsvisit
 	{
 	    my @l = $self->parents($k, $p);
 	    #warn "dependency loop: $k -> $p\n";
-	    warn "dependency loop: ",join(',', @l),"\n" if $warnings;
+	    $self->addcycle(\@l);
+	    warn "dependency loop: ",join(',', @l),"\n" if $warnings || $self->{'cyclefree'};
 	    die if $self->{'cyclefree'};
 	    push @{$self->{'backwardedges'}->{$k}}, $p;
 	}
@@ -165,8 +197,11 @@ sub rdfsvisit
 	    if ($self->{'backwardedges'}->{$p}) {
 		#printf STDERR "%s: checking %s edges to %s [%s]\n", $k, $p, join(',', @{$self->{'backwardedges'}->{$p}}), join(',', $self->parents($k));
 		my $pp = $k;
+		my @l = ($pp);
 		while ($pp = $self->{'parent'}->{$pp}) {
+		    push @l, $pp;
 		    if (grep { $_ eq $pp} @{$self->{'backwardedges'}->{$p}}) {
+			$self->addcycle(\@l);
 			warn "cross edge is part of a loop: $k -> $p\n" if $warnings;
 		    }
 		}
@@ -179,15 +214,21 @@ sub rdfsvisit
     $self->{'time'}++;
 }
 
+sub _unify {
+    my %h = map {$_ => 1} @_;
+    return grep(delete($h{$_}), @_);
+}
+
 sub startrdfs
 {
     my $self = shift;
     my $what = $_[0];
     my @tovisit;
-    for (qw/visited begintime endtime reversedgraph reverseorder/) {
+    for (qw/visited begintime endtime reversedgraph reverseorder cycles cyclepkgs/) {
 	$self->{$_} = {};
     }
     $self->{'time'}=0;
+    $self->{'numcycles'}=0;
     $self->{'topsorted'}=[];
     for my $node (keys %{$self->{'nodes'}})
     {
@@ -217,70 +258,16 @@ sub startrdfs
 	    $self->{'number'}++;
 	}
     }
-}
-
-sub _unify {
-    my %h = map {$_ => 1} @_;
-    return grep(delete($h{$_}), @_);
+    my $cycles = $self->{'cycles'};
+    for (keys %$cycles) {
+	$cycles->{$_} = [ _unify(@{$cycles->{$_}}) ];
+    }
 }
 
 sub findcycles
 {
     my $self = shift;
-    my @todo = @_?@_:keys %{$self->{'backwardedges'}};
-    my %cycles;
-    my %cyclepkgs;
-    my $nc = 0;
-    for my $n (@todo) {
-	#print "visiting $n\n";
-	my @l = ($n);
-	my %b = map {
-	    $_ => 1;
-	} @{$self->{'backwardedges'}->{$n}};
-	# visit our parents
-	while (my $p = $self->{'parent'}->{$n}) {
-	    #print "  parent $p\n";
-	    unshift @l, $p;
-	    # no need to visit parents that are not involved in the loop
-	    delete $b{$p} if exists($b{$p});
-	    last unless %b;
-	    $n = $p;
-	}
-	if (0) { # for debugging
-	    my $cycle = join(',', sort(@l));
-	    # can not happen
-	    warn "cycle $cycle already seen\n" if $cycles{$cycle};
-	    $cycles{$cycle} = [@l];
-	} else {
-	    #print "$n ", join(',', @l), "\n";
-	    my $cid; # cycle id
-	    for my $p (@l) {
-		if (my $id = $cyclepkgs{$p}) {
-		    if ($cid && $cid != $id) {
-			warn "$p: folding cycle cycle $id (",join(',', @{$cycles{$id}}),") into $cid (",join(',', @{$cycles{$cid}}),")\n" if $warnings;
-			push @l, @{$cycles{$id}};
-			for (@{$cycles{$id}}) {
-			    $cyclepkgs{$_} = $cid;
-			}
-			delete $cycles{$id};
-		    } else {
-			$cid = $id;
-		    }
-		}
-	    }
-	    $cid ||= $nc++;
-	    for (@l) {
-		die "$_ $cyclepkgs{$_} $cid\n" if $cyclepkgs{$_} && $cyclepkgs{$_} != $cid; # can't happen
-		$cyclepkgs{$_} = $cid;
-	    }
-
-	    push @{$cycles{$cid}}, @l;
-	}
-    }
-    for (keys %cycles) {
-	$cycles{$_} = [ _unify(@{$cycles{$_}}) ];
-    }
-    return %cycles;
+    return %{$self->{'cycles'}};
 }
 
 
