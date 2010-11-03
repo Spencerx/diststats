@@ -1,0 +1,6 @@
+#!/bin/bash
+
+set -e
+test -n "$1" || exit 1
+./dfs.pl openSUSE\:Factory/standard/i586 "$1" > $1.dot
+dot -Tps $1.dot > $1.eps && okular $1.eps

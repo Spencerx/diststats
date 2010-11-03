@@ -1,0 +1,128 @@
+#!/usr/bin/perl -w
+# Copyright (C) 2010 SUSE LINUX Products GmbH
+#
+# Author: Ludwig Nussel
+#
+# This program is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License
+# version 2 as published by the Free Software Foundation.
+# 
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+# 
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+
+# --drawlongest pkgname -> draws a graph to help analyze the longest path
+
+use strict;
+
+use gv;
+
+use Getopt::Long;
+Getopt::Long::Configure("no_ignore_case");
+
+my %args;
+GetOptions (
+  \%args,
+  'h|help',
+  'drawlongest=s',
+  'max=i',
+  'output=s',
+) or exit(1);
+
+my $dist = shift @ARGV;
+
+die("No dist specified!\n") unless $dist ne '';
+my $ddir = $dist;
+$ddir =~ s,/,_,g;
+$ddir = "output/$ddir";
+
+sub hhmm {
+  my $t = shift;
+  $t /= 60;
+  return sprintf("%02d:%02d", int($t / 60), $t % 60);
+}
+
+my %buildtime;
+my %pdeps;
+my $numpacks;
+my %nbuild;
+my %nwait;
+my %finished;
+my @packs_to_setup;
+my $packalias = {};
+
+    open(IN, '<', "$ddir/deps") || die "$!";
+    while (<IN>) {
+      chomp;
+      my @a = split(/ /);
+      if ($a[0] eq 'a') {
+	$packalias->{$a[1]} = $a[2];
+      } elsif ($a[0] eq 'b') {
+	$buildtime{$a[1]} = $a[2];
+	$pdeps{$a[1]} = [@a[3 .. $#a]];
+	push @packs_to_setup, $a[1] unless $a[1] =~ /,/;
+      }
+    }
+    close IN;
+    open(IN, '<', "$ddir/simul") || die "$!";
+    while (<IN>) {
+      chomp;
+      my @a = split(/ /);
+      if ($a[0] eq 'n') {
+	$numpacks = $a[1];
+      } elsif ($a[0] eq 't') {
+	$nbuild{$a[1]} = $a[2];
+	$nwait{$a[1]} = $a[3];
+      } elsif ($a[0] eq 'f') {
+	$finished{$a[1]} = $a[2];
+      }
+    }
+    close IN;
+
+my @colors = (qw/blue gray green yellow blue cyan/);
+sub visitlongest
+{
+  my ($g, $p, $seen) = @_;
+  $seen->{$p} = 1;
+  my $pn = $packalias->{$p} || $p;
+  #print "visiting $pn\n";
+  my $n = gv::node($g, $pn);
+  gv::setv($n, 'label',
+    sprintf("%s\n%s", $pn, hhmm($finished{$p})));
+  #gv::setv($n, 'rank', $finished{$p});
+  my @deps = sort {$finished{$b} <=> $finished{$a}} @{$pdeps{$p}};
+  my $max = $args{'max'} || 2;
+  --$max; $max = 0 unless $max > 0;
+  $max = $#deps>$max?$max:$#deps;
+  for my $i (0 .. $max) {
+    my $d = $deps[$i];
+    visitlongest($g, $d, $seen) unless exists $seen->{$d};
+    my $dn = $packalias->{$d} || $d;
+    my $e = gv::edge($g, $pn, $dn);
+    gv::setv($e, 'color', $colors[$i%$#colors]);
+    if ($i) {
+      gv::setv($e, 'label',
+	#sprintf('%d%%', int($finished{$d}/$finished{$deps[$i-1]}*100))
+	'-'.hhmm($finished{$deps[$i-1]}-$finished{$d})
+      );
+    }
+  }
+
+}
+
+if ($args{'drawlongest'}) {
+  my %seen;
+  my $p = $args{'drawlongest'};
+  my $file = $args{'output'} || $p.'.pdf';
+  my $g = gv::digraph($p);
+  visitlongest($g, $p, \%seen);
+  gv::layout($g, 'dot');
+  gv::render($g, "pdf", $file);
+}
+
+# vim: sw=2
