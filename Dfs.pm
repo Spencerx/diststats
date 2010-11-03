@@ -4,6 +4,8 @@ package Dfs;
 
 use strict;
 
+our $warnings = 1;
+
 sub new {
     my $class = shift;
     my $self = {
@@ -19,6 +21,8 @@ sub new {
 	where => {},
 	number => undef,
 
+	cyclefree => undef,  # die if graph contains cycles
+
 	visited => {},
 	begintime => {},
 	endtime => {},
@@ -33,7 +37,7 @@ sub new {
     return $self;
 }
 
-# non recoursive dfs
+# non recursive dfs
 
 sub dfsvisit
 {
@@ -107,11 +111,23 @@ sub startdfs
     }
 }
 
-# recoursive dfs
+# recursive dfs
+
+sub parents {
+    my ($self, $from, $to) = @_;
+    my $pp = $from;
+    my @l = ($pp);
+    while ($pp = $self->{'parent'}->{$pp}) {
+	push @l, $pp;
+	last if $to && $pp eq $to;
+    }
+    return @l;
+}
 
 sub rdfsvisit
 {
     my ($self, $k) = @_;
+    #printf STDERR "visiting %s %d\n", $k, $self->{'time'};
     $self->{'begintime'}->{$k}=$self->{'time'};
     $self->{'time'}++;
     $self->{'visited'}->{$k}=1;
@@ -136,24 +152,29 @@ sub rdfsvisit
 	}
 	elsif(!exists $self->{'endtime'}->{$p})
 	{
-	    #my @l = ($p);
-	    #while ($self->{'parent'}->{$p}=$k;
-	    #print STDERR "dependency loop: $k -> $p\n";
+	    my @l = $self->parents($k, $p);
+	    #warn "dependency loop: $k -> $p\n";
+	    warn "dependency loop: ",join(',', @l),"\n" if $warnings;
+	    die if $self->{'cyclefree'};
 	    push @{$self->{'backwardedges'}->{$k}}, $p;
 	}
 	else
 	{
 	    push @{$self->{'reversedgraph'}->{$p}}, $k;
 	    $self->{'reverseorder'}->{$k}++;
-	    # take the longer route
-	    #if (exists $self->{'parent'}->{$p}
-	    #&& exists $self->{'parent'}->{$k}
-	    #&& $self->{'parent'}->{$p} eq $self->{'parent'}->{$k}) {
-	    #	$self->{'parent'}->{$p}=$k;
-	    #}
+	    if ($self->{'backwardedges'}->{$p}) {
+		#printf STDERR "%s: checking %s edges to %s [%s]\n", $k, $p, join(',', @{$self->{'backwardedges'}->{$p}}), join(',', $self->parents($k));
+		my $pp = $k;
+		while ($pp = $self->{'parent'}->{$pp}) {
+		    if (grep { $_ eq $pp} @{$self->{'backwardedges'}->{$p}}) {
+			warn "cross edge is part of a loop: $k -> $p\n" if $warnings;
+		    }
+		}
+	    }
 	}
     }
     $self->{'endtime'}->{$k}=$self->{'time'};
+    #printf STDERR "done %s %d\n", $k, $self->{'time'};
     push (@{$self->{'topsorted'}}, $k) if $self->{'do_topsort'};
     $self->{'time'}++;
 }
@@ -209,13 +230,16 @@ sub findcycles
     my @todo = @_?@_:keys %{$self->{'backwardedges'}};
     my %cycles;
     my %cyclepkgs;
+    my $nc = 0;
     for my $n (@todo) {
+	#print "visiting $n\n";
 	my @l = ($n);
 	my %b = map {
 	    $_ => 1;
 	} @{$self->{'backwardedges'}->{$n}};
 	# visit our parents
 	while (my $p = $self->{'parent'}->{$n}) {
+	    #print "  parent $p\n";
 	    unshift @l, $p;
 	    # no need to visit parents that are not involved in the loop
 	    delete $b{$p} if exists($b{$p});
@@ -225,14 +249,32 @@ sub findcycles
 	if (0) { # for debugging
 	    my $cycle = join(',', sort(@l));
 	    # can not happen
-	    #  print STDERR "cycle $cycle already seen\n" if $cycles{$cycle};
+	    warn "cycle $cycle already seen\n" if $cycles{$cycle};
 	    $cycles{$cycle} = [@l];
 	} else {
-	    my $c = exists $cyclepkgs{$n}?$cyclepkgs{$n}:$n;
-	    push @{$cycles{$c}}, @l;
-	    for (@l) {
-		$cyclepkgs{$_} = $c;
+	    #print "$n ", join(',', @l), "\n";
+	    my $cid; # cycle id
+	    for my $p (@l) {
+		if (my $id = $cyclepkgs{$p}) {
+		    if ($cid && $cid != $id) {
+			warn "$p: folding cycle cycle $id (",join(',', @{$cycles{$id}}),") into $cid (",join(',', @{$cycles{$cid}}),")\n" if $warnings;
+			push @l, @{$cycles{$id}};
+			for (@{$cycles{$id}}) {
+			    $cyclepkgs{$_} = $cid;
+			}
+			delete $cycles{$id};
+		    } else {
+			$cid = $id;
+		    }
+		}
 	    }
+	    $cid ||= $nc++;
+	    for (@l) {
+		die "$_ $cyclepkgs{$_} $cid\n" if $cyclepkgs{$_} && $cyclepkgs{$_} != $cid; # can't happen
+		$cyclepkgs{$_} = $cid;
+	    }
+
+	    push @{$cycles{$cid}}, @l;
 	}
     }
     for (keys %cycles) {
