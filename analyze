@@ -30,6 +30,7 @@ GetOptions (
   \%args,
   'h|help',
   'drawlongest=s',
+  'needed',
   'max=i',
   'output=s',
 ) or exit(1);
@@ -123,6 +124,20 @@ if ($args{'drawlongest'}) {
   visitlongest($g, $p, \%seen);
   gv::layout($g, 'dot');
   gv::render($g, "pdf", $file);
+} elsif ($args{'needed'}) {
+  my @packs = keys %pdeps;
+  my $num = @packs;
+  my %needed = map {$_ => 0} @packs;
+  for my $p (@packs) {
+    for (@{$pdeps{$p}}) {
+      $needed{$_}++;
+    }
+  }
+  for my $p (sort {$needed{$a} <=> $needed{$b} } @packs) {
+    printf("%d %5.1f%% %s\n", $needed{$p}, $needed{$p}/$num*100, $p);
+  }
+} else {
+  die "need one of --needed or --drawlongest=x\n";
 }
 
 # vim: sw=2

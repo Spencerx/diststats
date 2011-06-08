@@ -1,0 +1,11 @@
+basic simulation run:
+
+./mkdiststats openSUSE:Factory/standard/i586
+
+find most important packages:
+
+./analyze openSUSE:Factory/standard/i586 --needed
+
+draw longest path of a package:
+
+./analyze openSUSE:Factory/standard/i586 --drawlongest=krb5
