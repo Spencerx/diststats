@@ -126,15 +126,29 @@ if ($args{'drawlongest'}) {
   gv::render($g, "pdf", $file);
 } elsif ($args{'needed'}) {
   my @packs = keys %pdeps;
-  my $num = @packs;
+  my %cycles;
+  my @cycles;
   my %needed = map {$_ => 0} @packs;
   for my $p (@packs) {
+    if ($p =~ /,/) {
+      push @cycles, $p;
+      for my $q (split (/,/, $p)) {
+	$cycles{$q} = $p;
+      }
+    }
     for (@{$pdeps{$p}}) {
       $needed{$_}++;
     }
   }
+  for my $p (keys %cycles) {
+    $needed{$p} = $needed{$cycles{$p}};
+  }
+  my $num = @packs - @cycles;
   for my $p (sort {$needed{$a} <=> $needed{$b} } @packs) {
-    printf("%d %5.1f%% %s\n", $needed{$p}, $needed{$p}/$num*100, $p);
+    next if $p =~ /,/;
+    my $n = $p;
+    $n .= '*' if exists $cycles{$p};
+    printf("%d %5.1f%% %s\n", $needed{$p}, $needed{$p}/$num*100, $n);
   }
 } else {
   die "need one of --needed or --drawlongest=x\n";
