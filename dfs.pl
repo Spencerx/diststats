@@ -25,7 +25,7 @@ my %depors;
 
 my $dist = shift @ARGV;
 
-die("No dist specified!\n") unless $dist ne '';
+die("No dist specified!\n") unless $dist && $dist ne '';
 my $ddir = $dist;
 $ddir =~ s,/,_,g;
 $ddir = "output/$ddir";
@@ -56,34 +56,45 @@ my %finished;
     my %nbuild;
     my %nwait;
     my %needed;
+    my $file = "$ddir/simul";
 
-    open(IN, '<', "$ddir/simul") || die "$!";
-    while (<IN>) {
-	chomp;
-	my @a = split(/ /);
-	if ($a[0] eq 'n') {
-	    $numpacks = $a[1];
-	} elsif ($a[0] eq 't') {
-	    $nbuild{$a[1]} = $a[2];
-	    $nwait{$a[1]} = $a[3];
-	} elsif ($a[0] eq 'f') {
-	    $finished{$a[1]} = $a[2];
+    if (open(IN, '<', $file)) {
+	while (<IN>) {
+	    chomp;
+	    my @a = split(/ /);
+	    if ($a[0] eq 'n') {
+		$numpacks = $a[1];
+	    } elsif ($a[0] eq 't') {
+		$nbuild{$a[1]} = $a[2];
+		$nwait{$a[1]} = $a[3];
+	    } elsif ($a[0] eq 'f') {
+		$finished{$a[1]} = $a[2];
+	    }
 	}
+	close IN;
+    } else {
+	warn "$file: $!\n";
     }
-    close IN;
 }
 
 my @ipackages = splice @ARGV;
 use Dfs;
+$Dfs::warnings = 0;
 my $self = new Dfs(\%pdeps);
-$self->startrdfs(@ipackages);
+$self->starttarjan(@ipackages);
 my %cycles = $self->findcycles();
+# print STDERR Dumper(\%cycles);
 for my $c (keys %cycles) {
+    printf STDERR "cycle %d: %s\n", $c, join(',', sort(@{$cycles{$c}}));
     for my $p (@{$cycles{$c}}) {
 	$cycles{$p} = 1;
     }
     delete $cycles{$c};
 }
+
+$self->startrdfs(@ipackages);
+
+#exit (0);
 
 my %highlight;
 if (0) {
@@ -121,7 +132,7 @@ if ($printreversed == 0)
 	    my $nn = $node;
 	    $nn = $alias->{$nn} if exists $alias->{$nn};
 	    #$nn .= sprintf '\n%d/%d', $self->{'begintime'}->{$node}, $self->{'endtime'}->{$node};
-	    if (exists $buildtime{$node}) {
+	    if (exists $finished{$node}) {
 		$nn .= '\n'.hhmm($finished{$node});
 	    }
 	    print "\"$node\" [label=\"$nn\"]\n";

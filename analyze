@@ -42,6 +42,8 @@ my $ddir = $dist;
 $ddir =~ s,/,_,g;
 $ddir = "output/$ddir";
 
+die "$ddir invalid\n" unless -e "$ddir/deps";
+
 sub hhmm {
   my $t = shift;
   $t /= 60;
@@ -124,6 +126,7 @@ if ($args{'drawlongest'}) {
   visitlongest($g, $p, \%seen);
   gv::layout($g, 'dot');
   gv::render($g, "pdf", $file);
+  print "wrote $file\n";
 } elsif ($args{'needed'}) {
   my @packs = keys %pdeps;
   my %cycles;
