@@ -201,7 +201,8 @@ sub handle_end_builddep($)
     push(@{$deps{$pack}}, $text);
   } elsif ($name eq 'subpkg') {
     push(@{$subpacks{$pack}}, $text);
-    $subpack2pack{$text} = $pack;
+    # ignore the subpackages produced by preinstall images. They are optional
+    $subpack2pack{$text} = $pack unless $pack =~ /^preinstallimage-/;
   }
   $text = '';
 }
