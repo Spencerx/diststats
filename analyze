@@ -93,8 +93,15 @@ sub visitlongest
   my ($g, $p, $seen) = @_;
   $seen->{$p} = 1;
   my $pn = $packalias->{$p} || $p;
-  #print "visiting $pn\n";
+  #print STDERR "visiting $pn\n";
   my $n = gv::node($g, $pn);
+
+  for my $d ($p, @{$pdeps{$p}}) {
+    next if defined $finished{$d};
+    print STDERR "$d not in finished\n";
+    $finished{$d} = 0;
+  }
+
   gv::setv($n, 'label',
     sprintf("%s\n%s", $pn, hhmm($finished{$p})));
   #gv::setv($n, 'rank', $finished{$p});
