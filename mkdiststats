@@ -378,15 +378,14 @@ for my $c (keys %cycles) {
   print "CYCLE $cn\n";
 #  $cycles{$cn} = $cycles{$c};
   my $eti = 0;
+  my $maxeti = 0;
   for my $p (@{$cycles{$c}}) {
     $cycles{$p} = $cn;
+    $eti += $buildtime{$p};
     # find longest time
-    # FIXME: add all times
-    $eti = $buildtime{$p} if $eti < $buildtime{$p};
+    $maxeti = $buildtime{$p} if $maxeti < $buildtime{$p};
   }
-  # twice the time of the longest package
-  $eti *= 2;
-  $buildtime{$cn} = $eti;
+  $buildtime{$cn} = $eti + $maxeti;
 }
 
 my %cycledeps; # collects deps of the packages of a cycle 
