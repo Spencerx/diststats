@@ -120,6 +120,8 @@ sub visitlongest
 	#sprintf('%d%%', int($finished{$d}/$finished{$deps[$i-1]}*100))
 	'-'.hhmm($finished{$deps[$i-1]}-$finished{$d})
       );
+    } else {
+      gv::setv($e, 'label', hhmm($finished{$p}-$finished{$d}));
     }
   }
 
